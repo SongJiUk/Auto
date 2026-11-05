@@ -1,0 +1,53 @@
+{
+  "outputFolder": "output",
+  "documents": [
+    {
+      "id": "daily_report",
+      "name": "공사일보_출력일보",
+      "templateFile": "samples/공사일보_출력일보_26.11.04.xlsx",
+      "outputPattern": "공사일보_출력일보_{yy}.{MM}.{dd}.xlsx",
+      "sheetName": "공사일보",
+      "frequency": "daily",
+      "includesSujangjae": false,
+      "fields": [
+        { "id": "date",           "label": "날짜",          "type": "date_korean",  "cell": "C6" },
+        { "id": "weather",        "label": "날씨",          "type": "text",         "cell": "L6" },
+        {
+          "id": "today_work",     "label": "금일 작업사항", "type": "multiline",
+          "cells": ["A9","A10","A11","A12","A13","A14","A15","A16","A17"]
+        },
+        {
+          "id": "tomorrow_work",  "label": "명일 작업사항", "type": "multiline",
+          "cells": ["L9","L10","L11","L12","L13","L14","L15","L16","L17"]
+        },
+        {
+          "id": "equipment_table", "label": "장비 투입현황", "type": "equipment_table",
+          "startRow": 20, "endRow": 32,
+          "nameCol": "A", "prevDayCol": "F", "todayCol": "H"
+        },
+        {
+          "id": "personnel_table", "label": "인원 투입현황", "type": "personnel_table",
+          "startRow": 20, "endRow": 32,
+          "roleCol": "L", "prevCumulativeCol": "N", "todayCol": "P"
+        }
+      ]
+    },
+    {
+      "id": "tbm",
+      "name": "TBM일지_사진대지",
+      "templateFile": "samples/TBM일지_사진대지_26.11.04.xlsx",
+      "outputPattern": "TBM일지_사진대지_{yy}.{MM}.{dd}.xlsx",
+      "sheetName": "TBM일지 서식11월",
+      "frequency": "daily",
+      "includesSujangjae": true,
+      "fields": [
+        { "id": "date",              "label": "작성일자", "type": "date_simple",            "cell": "F4"  },
+        { "id": "personnel",         "label": "인원",     "type": "tbm_personnel",          "cell": "AD6" },
+        { "id": "equipment_names",   "label": "장비",     "type": "active_equipment_names", "cell": "F7"  },
+        { "id": "planned_personnel", "label": "계획인원", "type": "tbm_personnel",          "cell": "I16" },
+        { "id": "actual_personnel",  "label": "실시인원", "type": "tbm_personnel",          "cell": "O16" },
+        { "id": "attendance_rate",   "label": "참석율",   "type": "attendance_rate",        "cell": "U16" }
+      ]
+    }
+  ]
+}

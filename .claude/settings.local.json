@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(\"C:/Program Files/Microsoft Visual Studio/2022/Community/dotnet/net8.0/runtime/dotnet.exe\" --version)",
+      "Bash(python3:*)",
+      "Bash(python:*)",
+      "Bash(where dotnet:*)",
+      "Bash(mkdir -p \"C:/Users/wldnr/OneDrive/바탕 화면/서식채우기/src/FormFiller.Core\")",
+      "Bash(mkdir -p \"C:/Users/wldnr/OneDrive/바탕 화면/서식채우기/src/FormFiller.App/ViewModels\")"
+    ]
+  }
+}
