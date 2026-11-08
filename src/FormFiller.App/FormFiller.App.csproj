@@ -6,12 +6,15 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <!-- UseWPF: XAML 파일과 WPF 런타임을 사용하겠다는 선언 -->
     <UseWPF>true</UseWPF>
+
     <RootNamespace>FormFiller.App</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\FormFiller.Core\FormFiller.Core.csproj" />
   </ItemGroup>
+
+
 
   <ItemGroup>
     <!-- config.json을 빌드 출력 폴더에 복사한다 (PreserveNewest: 소스가 더 새 것일 때만 복사) -->

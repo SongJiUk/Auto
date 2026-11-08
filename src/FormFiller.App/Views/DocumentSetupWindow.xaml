@@ -215,15 +215,9 @@
                                    VerticalAlignment="Center" Margin="12,0,0,0"/>
                     </StackPanel>
 
-                    <!-- 엑셀 미리보기 영역: ScrollViewer 안에 code-behind 에서 Grid 를 동적 생성 -->
-                    <Border Grid.Row="2" BorderBrush="#CBD5E0" BorderThickness="1"
-                            Background="White">
-                        <ScrollViewer x:Name="PreviewScrollViewer"
-                                      HorizontalScrollBarVisibility="Auto"
-                                      VerticalScrollBarVisibility="Auto">
-                            <!-- code-behind 에서 PreviewGrid 에 셀을 동적으로 추가한다 -->
-                            <Grid x:Name="PreviewGrid"/>
-                        </ScrollViewer>
+                    <!-- 엑셀 미리보기: HwndHost 로 실제 Excel 임베드 -->
+                    <Border x:Name="PreviewBorder" Grid.Row="2" BorderBrush="#CBD5E0" BorderThickness="1">
+                        <ContentControl x:Name="ExcelHostControl"/>
                     </Border>
 
                     <!-- 선택된 셀 정보 (하단) -->

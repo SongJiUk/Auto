@@ -159,38 +159,21 @@ public class DocumentSetupViewModel : ViewModelBase
     // ── 엑셀 미리보기 데이터 ──────────────────────────────────────
     // ════════════════════════════════════════════════════════════════
 
-    private string[,]? _previewData;
+    private ExcelPreviewData? _previewFull;
 
     /// <summary>
-    /// 엑셀 미리보기 셀 값 2D 배열 [row, col] (0-based).
-    /// View(code-behind) 가 이 값을 읽어 Grid 를 동적으로 생성한다.
+    /// 엑셀 미리보기 전체 데이터 (셀 값·배경색·정렬·볼드·테두리·열 너비·행 높이·병합 셀).
+    /// View(code-behind) 가 이 객체 하나로 Grid 를 완성한다.
+    /// null 이면 미리보기 없음.
     /// </summary>
-    public string[,]? PreviewData
+    public ExcelPreviewData? PreviewFull
     {
-        get => _previewData;
+        get => _previewFull;
         private set
         {
-            _previewData = value;
+            _previewFull = value;
             OnPropertyChanged();
         }
-    }
-
-    private int _previewRowCount;
-
-    /// <summary>미리보기 배열의 실제 행 수</summary>
-    public int PreviewRowCount
-    {
-        get => _previewRowCount;
-        private set => SetField(ref _previewRowCount, value);
-    }
-
-    private int _previewColCount;
-
-    /// <summary>미리보기 배열의 실제 열 수</summary>
-    public int PreviewColCount
-    {
-        get => _previewColCount;
-        private set => SetField(ref _previewColCount, value);
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -238,6 +221,13 @@ public class DocumentSetupViewModel : ViewModelBase
 
     /// <summary>피커 모드 활성 여부 (안내 패널 표시용)</summary>
     public bool IsPickerActive => _activePickerField != null;
+
+    // ════════════════════════════════════════════════════════════════
+    // ── 이벤트 ────────────────────────────────────────────────────
+    // ════════════════════════════════════════════════════════════════
+
+    /// <summary>저장 성공 시 View 에 창 닫기를 요청하는 이벤트</summary>
+    public event EventHandler? SaveSucceeded;
 
     // ════════════════════════════════════════════════════════════════
     // ── 필드 목록 ─────────────────────────────────────────────────
@@ -450,35 +440,54 @@ public class DocumentSetupViewModel : ViewModelBase
 
     /// <summary>
     /// 시트가 바뀌었을 때 엑셀 미리보기 데이터를 다시 읽는다.
-    /// GetUsedRange 로 실제 사용 범위를 먼저 파악하고, GetCellValues 로 2D 배열을 채운다.
+    /// GetPreviewData 로 모든 스타일 정보를 한 번에 가져온다.
+    /// 실패 시 셀 값만 읽는 간단한 방식으로 폴백한다.
     /// </summary>
     private void ReloadPreviewData()
     {
         if (string.IsNullOrWhiteSpace(_filePath) || string.IsNullOrWhiteSpace(_selectedSheet))
         {
-            PreviewData      = null;
-            PreviewRowCount  = 0;
-            PreviewColCount  = 0;
+            PreviewFull = null;
             return;
         }
 
-        // 실제 사용 범위 파악 (최대 50행 × 30열로 자동 제한됨)
-        (int maxRow, int maxCol) = ExcelAnalyzer.GetUsedRange(_filePath, _selectedSheet);
-
-        if (maxRow == 0 || maxCol == 0)
+        // 1차 시도: 스타일·병합·너비 포함 전체 데이터
+        var full = ExcelAnalyzer.GetPreviewData(_filePath, _selectedSheet);
+        if (full != null)
         {
-            PreviewData     = null;
-            PreviewRowCount = 0;
-            PreviewColCount = 0;
+            PreviewFull = full;
             return;
         }
 
-        // 셀 값 2D 배열 로드
-        var data = ExcelAnalyzer.GetCellValues(_filePath, _selectedSheet, maxRow, maxCol);
+        // 2차 폴백: 셀 값만 읽어서 최소한 그리드는 보이게 한다
+        System.Diagnostics.Debug.WriteLine(
+            "[DocumentSetupVM] GetPreviewData 실패 → 셀 값 폴백");
 
-        PreviewRowCount = data.GetLength(0);
-        PreviewColCount = data.GetLength(1);
-        PreviewData     = data; // 마지막에 set → View 에서 PropertyChanged 수신 후 Grid 재생성
+        (int maxRow, int maxCol) = ExcelAnalyzer.GetUsedRange(_filePath, _selectedSheet);
+        if (maxRow > 0 && maxCol > 0)
+        {
+            var values = ExcelAnalyzer.GetCellValues(_filePath, _selectedSheet, maxRow, maxCol);
+            int rows   = values.GetLength(0);
+            int cols   = values.GetLength(1);
+
+            PreviewFull = new ExcelPreviewData
+            {
+                Rows         = rows,
+                Cols         = cols,
+                Values       = values,
+                BgColors     = new uint?[rows, cols],
+                HAlignments  = new ExcelHAlign[rows, cols],
+                IsBold       = new bool[rows, cols],
+                Borders      = new ExcelBorderInfo[rows, cols],
+                ColWidthsPx  = Enumerable.Repeat(80.0, cols).ToArray(),
+                RowHeightsPx = Enumerable.Repeat(22.0, rows).ToArray(),
+                Merges       = [],
+            };
+        }
+        else
+        {
+            PreviewFull = null;
+        }
     }
 
     /// <summary>
@@ -615,6 +624,8 @@ public class DocumentSetupViewModel : ViewModelBase
 
             MessageBox.Show($"문서 '{DocumentName}' 이(가) 추가되었습니다.", "저장 완료",
                             MessageBoxButton.OK, MessageBoxImage.Information);
+
+            SaveSucceeded?.Invoke(this, EventArgs.Empty);
         }
         catch (Exception ex)
         {
