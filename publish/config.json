@@ -1,0 +1,32 @@
+﻿{
+  "OutputFolder": "output",
+  "Documents": [
+    {
+      "Id": "1",
+      "Name": "1",
+      "TemplateFile": "C:\\Users\\wldnr\\OneDrive\\\uBB38\uC11C\\\uCE74\uCE74\uC624\uD1A1 \uBC1B\uC740 \uD30C\uC77C\\\uC18C\uC74C\uCE21\uC815\uC77C\uC9C0(26.11.04).xlsx",
+      "OutputPattern": "\uD30C\uC77C\uBA85_{yy}.{MM}.{dd}.xlsx",
+      "SheetName": "Sheet1",
+      "Fields": [],
+      "Frequency": "daily",
+      "FrequencyDays": 0,
+      "IncludesSujangjae": false,
+      "SaveMode": "create",
+      "PhotoSheet": "\uC624\uC804\uCD08\uB4F1\uD559\uAD50",
+      "PhotoSlots": []
+    }
+  ],
+  "PresetWorkItems": [
+    "\uAD74\uC0AD\uAE30 \uC791\uC5C5",
+    "\uCCA0\uAC70 \uC791\uC5C5",
+    "\uC790\uC7AC \uBC18\uCD9C",
+    "\uC548\uC804 \uC810\uAC80",
+    "\uD604\uC7A5 \uC815\uB9AC",
+    "\uCF58\uD06C\uB9AC\uD2B8 \uD0C0\uC124",
+    "\uBC30\uAD00 \uC791\uC5C5",
+    "\uC804\uAE30 \uC791\uC5C5",
+    "\uAC00\uC124 \uC6B8\uD0C0\uB9AC \uC124\uCE58",
+    "\uD3D0\uAE30\uBB3C \uCC98\uB9AC"
+  ],
+  "ClaudeApiKey": "z"
+}

@@ -1,6 +1,7 @@
 samples/
 output/
-publish/
+# publish/ 는 추적함 (exe 배포용)
+publish/output/
 bin/
 obj/
 .vs/
