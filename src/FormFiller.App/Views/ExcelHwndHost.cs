@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
+using System.Windows.Media;
 
 namespace FormFiller.App.Views;
 
@@ -8,8 +9,9 @@ namespace FormFiller.App.Views;
 /// WPF HwndHost 를 상속해 Excel 창을 WPF 레이아웃 안에 직접 임베드한다.
 /// WindowsFormsHost 를 쓰지 않으므로 Office COM 메시지 루프와 충돌이 없다.
 ///
-/// [원리] BuildWindowCore 에서 중간 컨테이너 Win32 창을 만들고,
-///        AttachExcel 호출 시 Excel 창을 그 컨테이너의 자식으로 reparent 한다.
+/// [리사이즈] ArrangeOverride 에서 DPI 를 반영해 Win32 창 크기를 갱신한다.
+///            전체화면·최대화 시에도 WPF 레이아웃 패스가 이 메서드를 호출하므로
+///            Excel 창이 항상 올바른 크기를 유지한다.
 /// </summary>
 internal sealed class ExcelHwndHost : HwndHost
 {
@@ -36,7 +38,6 @@ internal sealed class ExcelHwndHost : HwndHost
     const int WS_MAXIMIZEBOX = 0x00010000;
     const int WS_MINIMIZEBOX = 0x00020000;
 
-    // ── 상태 ─────────────────────────────────────────────────────────
     private IntPtr _containerHwnd = IntPtr.Zero;
     private IntPtr _excelHwnd     = IntPtr.Zero;
 
@@ -44,7 +45,6 @@ internal sealed class ExcelHwndHost : HwndHost
 
     protected override HandleRef BuildWindowCore(HandleRef hwndParent)
     {
-        // hwndParent 의 자식 컨테이너 창 생성
         _containerHwnd = CreateWindowEx(
             0, "STATIC", null,
             WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
@@ -59,7 +59,6 @@ internal sealed class ExcelHwndHost : HwndHost
 
     protected override void DestroyWindowCore(HandleRef hwnd)
     {
-        // Excel 창은 여기서 닫지 않음 — CleanupExcel 에서 처리
         if (_excelHwnd != IntPtr.Zero)
             SetParent(_excelHwnd, IntPtr.Zero);
 
@@ -70,9 +69,29 @@ internal sealed class ExcelHwndHost : HwndHost
         }
     }
 
+    // ── 리사이즈: WPF 레이아웃 패스마다 호출 ───────────────────────
+    // ArrangeOverride 는 전체화면·최대화·창 크기 변경 모두에서 호출된다.
+    // OnRenderSizeChanged 보다 신뢰도가 높고 DPI 스케일도 여기서 처리한다.
+
+    protected override Size ArrangeOverride(Size finalSize)
+    {
+        var size = base.ArrangeOverride(finalSize);
+
+        // WPF 논리 단위(DIP) → 물리 픽셀 변환 (DPI 125%, 150% 등 대응)
+        var (dpiX, dpiY) = GetDpiScale();
+        int w = Math.Max(1, (int)(size.Width  * dpiX));
+        int h = Math.Max(1, (int)(size.Height * dpiY));
+
+        if (_containerHwnd != IntPtr.Zero)
+            MoveWindow(_containerHwnd, 0, 0, w, h, true);
+        if (_excelHwnd != IntPtr.Zero)
+            MoveWindow(_excelHwnd, 0, 0, w, h, true);
+
+        return size;
+    }
+
     // ── 공개 API ─────────────────────────────────────────────────────
 
-    /// <summary>Excel 창 핸들을 받아 컨테이너 안으로 reparent 한다.</summary>
     public void AttachExcel(IntPtr excelHwnd)
     {
         _excelHwnd = excelHwnd;
@@ -86,7 +105,6 @@ internal sealed class ExcelHwndHost : HwndHost
     {
         if (_excelHwnd == IntPtr.Zero || _containerHwnd == IntPtr.Zero) return;
 
-        // 타이틀바·테두리 제거 후 자식 창으로 변환
         int style = GetWindowLong(_excelHwnd, GWL_STYLE);
         style &= ~WS_CAPTION;
         style &= ~WS_THICKFRAME;
@@ -98,20 +116,16 @@ internal sealed class ExcelHwndHost : HwndHost
 
         SetParent(_excelHwnd, _containerHwnd);
 
-        int w = Math.Max(1, (int)ActualWidth);
-        int h = Math.Max(1, (int)ActualHeight);
+        var (dpiX, dpiY) = GetDpiScale();
+        int w = Math.Max(1, (int)(ActualWidth  * dpiX));
+        int h = Math.Max(1, (int)(ActualHeight * dpiY));
         MoveWindow(_excelHwnd, 0, 0, w, h, true);
     }
 
-    protected override void OnRenderSizeChanged(SizeChangedInfo info)
+    private (double x, double y) GetDpiScale()
     {
-        base.OnRenderSizeChanged(info);
-        int w = Math.Max(1, (int)info.NewSize.Width);
-        int h = Math.Max(1, (int)info.NewSize.Height);
-
-        if (_containerHwnd != IntPtr.Zero)
-            MoveWindow(_containerHwnd, 0, 0, w, h, true);
-        if (_excelHwnd != IntPtr.Zero)
-            MoveWindow(_excelHwnd, 0, 0, w, h, true);
+        var source = PresentationSource.FromVisual(this);
+        var m = source?.CompositionTarget?.TransformToDevice;
+        return (m?.M11 ?? 1.0, m?.M22 ?? 1.0);
     }
 }
