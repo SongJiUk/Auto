@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.IO;
 using System.Windows;
 using System.Windows.Input;
+using FormFiller.App.Views;
 using FormFiller.Core.Config;
 using FormFiller.Core.Excel;
 using FormFiller.Core.Models;
@@ -10,15 +11,12 @@ namespace FormFiller.App.ViewModels;
 
 /// <summary>
 /// MainWindow 의 DataContext.
-/// DataContext: Unity의 MonoBehaviour 가 GameObject 에 붙는 것처럼,
-/// ViewModel 이 화면(View)에 연결되어 데이터를 공급한다.
-/// XAML 에서 {Binding PropertyName} 으로 여기 프로퍼티에 접근한다.
 /// </summary>
 public class MainViewModel : ViewModelBase
 {
-    // ── 기본 정보 ─────────────────────────────────────────────────
+    // ── 기본 정보 ─────────────────────────────────────────────────────
     private DateTime _targetDate = DateTime.Today;
-    private string _weather = "맑음";
+    private string   _weather    = "맑음";
 
     public DateTime TargetDate
     {
@@ -26,7 +24,6 @@ public class MainViewModel : ViewModelBase
         set
         {
             if (SetField(ref _targetDate, value))
-                // 날짜가 바뀌면 "오늘 생성할 문서" 목록을 재계산한다
                 LoadDocumentDueList();
         }
     }
@@ -37,128 +34,227 @@ public class MainViewModel : ViewModelBase
         set => SetField(ref _weather, value);
     }
 
-    // ── 날씨 선택 목록 ────────────────────────────────────────────
     public IReadOnlyList<string> WeatherOptions { get; } =
         ["맑음", "구름많음", "흐림", "비", "눈"];
 
-    // ── 금일 작업사항 목록 ────────────────────────────────────────
-    public ObservableCollection<WorkItemViewModel> TodayWorkItems { get; } = [];
-    public ICommand AddTodayWorkCommand { get; }
+    // ── 금일 작업사항 (오전 / 오후) ──────────────────────────────────
+    public ObservableCollection<WorkItemViewModel> TodayMorningItems   { get; } = [];
+    public ObservableCollection<WorkItemViewModel> TodayAfternoonItems { get; } = [];
 
-    // ── 명일 작업사항 목록 ────────────────────────────────────────
+    // ── 명일 작업사항 ─────────────────────────────────────────────────
     public ObservableCollection<WorkItemViewModel> TomorrowWorkItems { get; } = [];
-    public ICommand AddTomorrowWorkCommand { get; }
 
-    // ── 장비 투입현황 ─────────────────────────────────────────────
-    public ObservableCollection<EquipmentEntryViewModel> Equipment { get; } =
-    [
-        new() { Name = "B/H 0.2", Spec = "5.8t"  },
-        new() { Name = "B/H 380", Spec = "39.6t" },
-        new() { Name = "B/H 480", Spec = "64.6t" },
-        new() { Name = "B/H 1.0", Spec = "32.0t" },
-    ];
+    // ── 장비 투입현황 ─────────────────────────────────────────────────
+    public ObservableCollection<EquipmentEntryViewModel> Equipment { get; } = [];
 
-    // ── 인원 투입현황 (공사팀) ────────────────────────────────────
-    public ObservableCollection<PersonnelEntryViewModel> Personnel { get; } =
-    [
-        new() { Role = "관리자" },
-        new() { Role = "벌목"   },
-        new() { Role = "비계"   },
-        new() { Role = "지하수" },
-        new() { Role = "석면"   },
-        new() { Role = "장비"   },
-    ];
+    // ── 인원 투입현황 (공사팀) ────────────────────────────────────────
+    public ObservableCollection<PersonnelEntryViewModel> Personnel { get; } = [];
 
-    // ── 수장재팀 별도 인원 ────────────────────────────────────────
-    public ObservableCollection<PersonnelEntryViewModel> SujangjaePersonnel { get; } =
-    [
-        new() { Role = "수장재" },
-    ];
+    // ── 수장재팀 별도 인원 ────────────────────────────────────────────
+    public ObservableCollection<PersonnelEntryViewModel> SujangjaePersonnel { get; } = [];
 
-    // ── 오늘 생성할 문서 목록 ─────────────────────────────────────
+    // ── 오늘 생성할 문서 목록 ─────────────────────────────────────────
     public ObservableCollection<DocumentDueItem> DocumentDueList { get; } = [];
 
-    // ── 사진 슬롯 ─────────────────────────────────────────────────
-    /// <summary>
-    /// 사진대지 등 이미지 슬롯이 있는 문서에서 자동으로 감지된 슬롯 목록.
-    /// config.json의 각 문서에서 photoSheet 설정이 있으면 슬롯을 자동 생성한다.
-    /// </summary>
+    // ── 사진 슬롯 ─────────────────────────────────────────────────────
     public ObservableCollection<PhotoSlotViewModel> PhotoSlots { get; } = [];
-
-    /// <summary>사진 섹션 표시 여부 (슬롯이 1개 이상 있을 때만)</summary>
     public bool HasPhotoSlots => PhotoSlots.Count > 0;
 
-    // ── 합계 (읽기 전용, 화면 하단에 표시) ──────────────────────
+    // ── 합계 (읽기 전용) ──────────────────────────────────────────────
     public int TotalTodayEquipment  => Equipment.Sum(e => e.TodayCount);
     public int TotalTodayPersonnel  => Personnel.Sum(p => p.TodayCount);
-
-    /// <summary>TBM 합계 = 공사인원 + 수장재인원</summary>
     public int TotalTodayPersonnelWithSujangjae =>
         Personnel.Sum(p => p.TodayCount) + SujangjaePersonnel.Sum(p => p.TodayCount);
 
-    // ── 커맨드 ────────────────────────────────────────────────────
+    // ── 커맨드 ────────────────────────────────────────────────────────
     public ICommand GenerateCommand { get; }
+
+    // 작업사항
+    public ICommand AddMorningWorkCommand       { get; }
+    public ICommand AddAfternoonWorkCommand     { get; }
+    public ICommand AddTomorrowWorkCommand      { get; }
+    public ICommand PickMorningWorkCommand      { get; }
+    public ICommand PickAfternoonWorkCommand    { get; }
+    public ICommand PickTomorrowWorkCommand     { get; }
+
+    // 장비 추가
+    public ICommand AddEquipmentCommand         { get; }
+
+    // 인원 추가
+    public ICommand AddPersonnelCommand         { get; }
+    public ICommand AddSujangjaeCommand         { get; }
+
+    // AI 도우미
+    public ICommand OpenAiAssistantCommand      { get; }
 
     public MainViewModel()
     {
-        GenerateCommand        = new RelayCommand(_ => OnGenerate());
-        AddTodayWorkCommand    = new RelayCommand(_ => AddWorkItem(TodayWorkItems));
-        AddTomorrowWorkCommand = new RelayCommand(_ => AddWorkItem(TomorrowWorkItems));
+        GenerateCommand          = new RelayCommand(_ => OnGenerate());
 
-        // 장비·인원 항목이 바뀔 때 합계도 갱신
-        foreach (var e in Equipment)
-            e.PropertyChanged += (_, _) => OnPropertyChanged(nameof(TotalTodayEquipment));
-        foreach (var p in Personnel)
-            p.PropertyChanged += (_, _) =>
-            {
-                OnPropertyChanged(nameof(TotalTodayPersonnel));
-                OnPropertyChanged(nameof(TotalTodayPersonnelWithSujangjae));
-            };
+        AddMorningWorkCommand    = new RelayCommand(_ => AddWorkItem(TodayMorningItems));
+        AddAfternoonWorkCommand  = new RelayCommand(_ => AddWorkItem(TodayAfternoonItems));
+        AddTomorrowWorkCommand   = new RelayCommand(_ => AddWorkItem(TomorrowWorkItems));
 
-        // 수장재 인원 변경 시 TBM 합계 갱신
-        foreach (var p in SujangjaePersonnel)
-            p.PropertyChanged += (_, _) => OnPropertyChanged(nameof(TotalTodayPersonnelWithSujangjae));
+        PickMorningWorkCommand   = new RelayCommand(_ => OpenWorkPicker(TodayMorningItems));
+        PickAfternoonWorkCommand = new RelayCommand(_ => OpenWorkPicker(TodayAfternoonItems));
+        PickTomorrowWorkCommand  = new RelayCommand(_ => OpenWorkPicker(TomorrowWorkItems));
 
-        // 어제 파일에서 작업사항 불러오기 (없으면 기본 빈 항목 1개)
+        AddEquipmentCommand      = new RelayCommand(_ => AddEquipmentRow());
+        AddPersonnelCommand      = new RelayCommand(_ => AddPersonnelRow(Personnel));
+        AddSujangjaeCommand      = new RelayCommand(_ => AddPersonnelRow(SujangjaePersonnel));
+
+        OpenAiAssistantCommand   = new RelayCommand(_ => OpenAiAssistant());
+
+        InitDefaultEquipment();
+        InitDefaultPersonnel();
+
+        // 항목 변경 시 합계 갱신
+        Equipment.CollectionChanged          += (_, _) => RefreshEquipmentSums();
+        Personnel.CollectionChanged          += (_, _) => RefreshPersonnelSums();
+        SujangjaePersonnel.CollectionChanged += (_, _) => RefreshPersonnelSums();
+
         LoadYesterdayWorkItems();
-
-        // 어제 파일에서 장비 누계 / 인원 총누계 채우기
         LoadYesterdayData();
-
-        // 문서 생성 주기 기반 오늘 목록 초기화
         LoadDocumentDueList();
-
-        // 사진 슬롯 감지
         LoadPhotoSlots();
     }
 
-    // ── 문서 목록 로드 ────────────────────────────────────────────
+    // ── 기본 장비·인원 초기화 ────────────────────────────────────────
 
-    /// <summary>
-    /// config.json 의 문서 목록을 읽어 DocumentDueList 를 갱신한다.
-    /// TargetDate 변경 시에도 호출되어 주기 판단을 재계산한다.
-    /// </summary>
+    private void InitDefaultEquipment()
+    {
+        AddEquipment("B/H 0.2", "5.8t");
+        AddEquipment("B/H 380", "39.6t");
+        AddEquipment("B/H 480", "64.6t");
+        AddEquipment("B/H 1.0", "32.0t");
+    }
+
+    private void InitDefaultPersonnel()
+    {
+        AddPersonnel(Personnel, "관리자");
+        AddPersonnel(Personnel, "벌목");
+        AddPersonnel(Personnel, "비계");
+        AddPersonnel(Personnel, "지하수");
+        AddPersonnel(Personnel, "석면");
+        AddPersonnel(Personnel, "장비");
+        AddPersonnel(SujangjaePersonnel, "수장재");
+    }
+
+    // ── 장비 행 추가/연결 ────────────────────────────────────────────
+
+    private EquipmentEntryViewModel AddEquipment(string name = "", string spec = "")
+    {
+        var vm = new EquipmentEntryViewModel(e =>
+        {
+            Equipment.Remove(e);
+            OnPropertyChanged(nameof(TotalTodayEquipment));
+        })
+        {
+            Name = name,
+            Spec = spec,
+        };
+        vm.PropertyChanged += (_, _) => OnPropertyChanged(nameof(TotalTodayEquipment));
+        Equipment.Add(vm);
+        return vm;
+    }
+
+    private void AddEquipmentRow() => AddEquipment();
+
+    // ── 인원 행 추가/연결 ────────────────────────────────────────────
+
+    private PersonnelEntryViewModel AddPersonnel(
+        ObservableCollection<PersonnelEntryViewModel> collection,
+        string role = "")
+    {
+        var vm = new PersonnelEntryViewModel(p =>
+        {
+            collection.Remove(p);
+            RefreshPersonnelSums();
+        })
+        {
+            Role = role,
+        };
+        vm.PropertyChanged += (_, _) => RefreshPersonnelSums();
+        collection.Add(vm);
+        return vm;
+    }
+
+    private void AddPersonnelRow(ObservableCollection<PersonnelEntryViewModel> collection)
+        => AddPersonnel(collection);
+
+    // ── 합계 갱신 ────────────────────────────────────────────────────
+
+    private void RefreshEquipmentSums()
+        => OnPropertyChanged(nameof(TotalTodayEquipment));
+
+    private void RefreshPersonnelSums()
+    {
+        OnPropertyChanged(nameof(TotalTodayPersonnel));
+        OnPropertyChanged(nameof(TotalTodayPersonnelWithSujangjae));
+    }
+
+    // ── 작업항목 선택 팝업 ────────────────────────────────────────────
+
+    private static void OpenWorkPicker(ObservableCollection<WorkItemViewModel> target)
+    {
+        var win = new WorkItemPickerWindow { Owner = Application.Current.MainWindow };
+        if (win.ShowDialog() == true)
+        {
+            foreach (var text in win.SelectedItems)
+                target.Add(new WorkItemViewModel(text, item => target.Remove(item)));
+        }
+    }
+
+    // ── AI 도우미 ─────────────────────────────────────────────────────
+
+    private void OpenAiAssistant()
+    {
+        var win = new AiAssistantWindow { Owner = Application.Current.MainWindow };
+        win.SetContext(BuildContextSummary());
+        win.Show();
+    }
+
+    private string BuildContextSummary()
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"날짜: {TargetDate:yyyy년 MM월 dd일}  날씨: {Weather}");
+
+        if (TodayMorningItems.Any())
+            sb.AppendLine("오전 작업: " + string.Join(", ", TodayMorningItems.Select(i => i.Text)));
+        if (TodayAfternoonItems.Any())
+            sb.AppendLine("오후 작업: " + string.Join(", ", TodayAfternoonItems.Select(i => i.Text)));
+
+        var eqList = Equipment.Where(e => e.TodayCount > 0)
+                               .Select(e => $"{e.Name}({e.TodayCount}대)");
+        if (eqList.Any())
+            sb.AppendLine("장비: " + string.Join(", ", eqList));
+
+        int totalPn = TotalTodayPersonnel + SujangjaePersonnel.Sum(p => p.TodayCount);
+        sb.AppendLine($"인원: 공사 {TotalTodayPersonnel}명  수장재 {SujangjaePersonnel.Sum(p => p.TodayCount)}명  합계 {totalPn}명");
+
+        return sb.ToString();
+    }
+
+    // ── 문서 목록 로드 ────────────────────────────────────────────────
+
     private void LoadDocumentDueList()
     {
         DocumentDueList.Clear();
         var    config  = AppConfigLoader.Load();
         string baseDir = AppDomain.CurrentDomain.BaseDirectory;
-
         foreach (var doc in config.Documents)
             DocumentDueList.Add(new DocumentDueItem(doc, TargetDate.Date, config.OutputFolder, baseDir));
     }
 
-    // ── 파일 생성 ────────────────────────────────────────────────
+    // ── 파일 생성 ────────────────────────────────────────────────────
 
     private void OnGenerate()
     {
         try
         {
-            // ── 1. 설정 로드 ─────────────────────────────────────────
             var    config  = AppConfigLoader.Load();
             string baseDir = AppDomain.CurrentDomain.BaseDirectory;
 
-            // ── 2. 체크된 문서만 추출 ────────────────────────────────
             var checkedDocs = DocumentDueList.Where(d => d.IsChecked).ToList();
             if (checkedDocs.Count == 0)
             {
@@ -167,10 +263,8 @@ public class MainViewModel : ViewModelBase
                 return;
             }
 
-            // ── 3. DailyInput 조립 ───────────────────────────────────
             var input = BuildDailyInput();
 
-            // ── 4. 어제 파일에서 전일 누계 읽기 ─────────────────────
             var dailyDoc = config.Documents.FirstOrDefault(d => d.Id == "daily_report");
             if (dailyDoc != null)
             {
@@ -178,11 +272,9 @@ public class MainViewModel : ViewModelBase
                 string   prevFileName = GenericExcelWriter.ApplyDatePattern(
                                             dailyDoc.OutputPattern, yesterday);
                 string   prevPath     = Path.Combine(baseDir, config.OutputFolder, prevFileName);
-
                 GenericExcelWriter.LoadPreviousDay(prevPath, input, dailyDoc);
             }
 
-            // ── 5. 체크된 문서만 생성 ───────────────────────────────
             var results = new List<string>();
             foreach (var dueItem in checkedDocs)
             {
@@ -191,48 +283,39 @@ public class MainViewModel : ViewModelBase
                 results.Add($"{dueItem.Name}: {Path.GetFileName(outputPath)}");
             }
 
-            // ── 6. 사진 삽입 ────────────────────────────────────────
             InsertPhotos(checkedDocs, config, baseDir, results);
 
-            // ── 7. 완료 메시지 ───────────────────────────────────────
             string summary = string.Join("\n", results.Prepend("파일 생성 완료!\n"));
-            MessageBox.Show(summary, "완료",
-                            MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(summary, "완료", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)
         {
-            MessageBox.Show(
-                $"파일 생성 중 오류가 발생했습니다.\n\n{ex.Message}",
-                "오류",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
+            MessageBox.Show($"파일 생성 중 오류가 발생했습니다.\n\n{ex.Message}", "오류",
+                            MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
-    /// <summary>
-    /// ViewModel 의 ObservableCollection 을 Core 모델(DailyInput)로 변환한다.
-    /// SujangjaePersonnel 도 함께 포함시킨다.
-    /// </summary>
     private DailyInput BuildDailyInput() => new()
     {
-        Date         = TargetDate,
-        Weather      = Weather,
-        TodayWork    = string.Join("\n", TodayWorkItems.Select(i => i.Text)),
-        TomorrowWork = string.Join("\n", TomorrowWorkItems.Select(i => i.Text)),
-        Equipment    = Equipment.Select(e => new EquipmentEntry
+        Date                 = TargetDate,
+        Weather              = Weather,
+        TodayMorningWork     = string.Join("\n", TodayMorningItems.Select(i => i.Text)),
+        TodayAfternoonWork   = string.Join("\n", TodayAfternoonItems.Select(i => i.Text)),
+        TomorrowWork         = string.Join("\n", TomorrowWorkItems.Select(i => i.Text)),
+        Equipment            = Equipment.Select(e => new EquipmentEntry
         {
             Name         = e.Name,
             Spec         = e.Spec,
             PrevDayCount = e.PrevDayCount,
             TodayCount   = e.TodayCount,
         }).ToList(),
-        Personnel    = Personnel.Select(p => new PersonnelEntry
+        Personnel            = Personnel.Select(p => new PersonnelEntry
         {
             Role                = p.Role,
             PrevCumulativeCount = p.PrevCumulativeCount,
             TodayCount          = p.TodayCount,
         }).ToList(),
-        SujangjaePersonnel = SujangjaePersonnel.Select(p => new PersonnelEntry
+        SujangjaePersonnel   = SujangjaePersonnel.Select(p => new PersonnelEntry
         {
             Role                = p.Role,
             PrevCumulativeCount = p.PrevCumulativeCount,
@@ -240,32 +323,20 @@ public class MainViewModel : ViewModelBase
         }).ToList(),
     };
 
-    // ── 작업사항 목록 초기화 ──────────────────────────────────────
+    // ── 작업사항 초기화 ───────────────────────────────────────────────
 
-    /// <summary>
-    /// 어제 output 파일을 찾아 작업사항 셀 값을 목록에 채운다.
-    /// 파일이 없거나 읽기에 실패하면 기본 빈 항목("- ")을 하나씩 추가한다.
-    /// </summary>
     private void LoadYesterdayWorkItems()
     {
         var config   = AppConfigLoader.Load();
         var dailyDoc = config.Documents.FirstOrDefault(d => d.Id == "daily_report");
-        if (dailyDoc == null)
-        {
-            InitDefaultItems();
-            return;
-        }
+        if (dailyDoc == null) { InitDefaultItems(); return; }
 
         DateTime yesterday = DateTime.Today.AddDays(-1);
         string   fileName  = GenericExcelWriter.ApplyDatePattern(dailyDoc.OutputPattern, yesterday);
         string   filePath  = Path.Combine(
             AppDomain.CurrentDomain.BaseDirectory, config.OutputFolder, fileName);
 
-        if (!File.Exists(filePath))
-        {
-            InitDefaultItems();
-            return;
-        }
+        if (!File.Exists(filePath)) { InitDefaultItems(); return; }
 
         try
         {
@@ -276,36 +347,21 @@ public class MainViewModel : ViewModelBase
                 filePath, isEditable: false);
             var wbPart = doc.WorkbookPart!;
             var wsPart = CellHelper.FindWorksheetPart(wbPart, dailyDoc.SheetName);
-            if (wsPart == null)
-            {
-                InitDefaultItems();
-                return;
-            }
+            if (wsPart == null) { InitDefaultItems(); return; }
 
-            LoadItemsFromCells(TodayWorkItems,    wsPart, todayField?.Cells);
+            LoadItemsFromCells(TodayMorningItems, wsPart, todayField?.Cells);
             LoadItemsFromCells(TomorrowWorkItems, wsPart, tomorrowField?.Cells);
         }
-        catch
-        {
-            InitDefaultItems();
-        }
+        catch { InitDefaultItems(); }
     }
 
-    /// <summary>
-    /// 지정한 셀 범위의 값을 읽어 items 컬렉션에 추가한다.
-    /// 값이 하나도 없으면 빈 항목("- ")을 하나 넣는다.
-    /// </summary>
     private void LoadItemsFromCells(
         ObservableCollection<WorkItemViewModel> items,
         DocumentFormat.OpenXml.Packaging.WorksheetPart wsPart,
         List<string>? cells)
     {
         items.Clear();
-        if (cells == null)
-        {
-            items.Add(CreateWorkItem("- ", items));
-            return;
-        }
+        if (cells == null) { items.Add(CreateWorkItem("- ", items)); return; }
 
         bool hasAny = false;
         foreach (var cellAddr in cells)
@@ -317,38 +373,27 @@ public class MainViewModel : ViewModelBase
                 hasAny = true;
             }
         }
-
-        if (!hasAny)
-            items.Add(CreateWorkItem("- ", items));
+        if (!hasAny) items.Add(CreateWorkItem("- ", items));
     }
 
-    /// <summary>금일·명일 작업사항 모두 빈 항목 하나로 초기화한다.</summary>
     private void InitDefaultItems()
     {
-        TodayWorkItems.Clear();
-        TodayWorkItems.Add(CreateWorkItem("- ", TodayWorkItems));
-
+        TodayMorningItems.Clear();
+        TodayMorningItems.Add(CreateWorkItem("- ", TodayMorningItems));
+        TodayAfternoonItems.Clear();
         TomorrowWorkItems.Clear();
         TomorrowWorkItems.Add(CreateWorkItem("- ", TomorrowWorkItems));
     }
 
-    /// <summary>WorkItemViewModel 을 생성하면서 삭제 콜백을 올바른 컬렉션에 연결한다.</summary>
     private static WorkItemViewModel CreateWorkItem(
-        string text,
-        ObservableCollection<WorkItemViewModel> owner)
+        string text, ObservableCollection<WorkItemViewModel> owner)
         => new(text, item => owner.Remove(item));
 
-    /// <summary>지정한 컬렉션에 빈 항목 하나를 추가하는 커맨드 핸들러.</summary>
     private static void AddWorkItem(ObservableCollection<WorkItemViewModel> items)
         => items.Add(new WorkItemViewModel("- ", item => items.Remove(item)));
 
-    // ── 어제 누계 로드 ────────────────────────────────────────────
+    // ── 어제 누계 로드 ────────────────────────────────────────────────
 
-    /// <summary>
-    /// 어제 output 파일을 열어 장비 누계(J열)와 인원 총누계(R열)를 읽은 뒤
-    /// Equipment[i].PrevDayCount 와 Personnel[i].PrevCumulativeCount 에 채운다.
-    /// 파일이 없거나 읽기에 실패하면 조용히 종료 (기존 0 값 유지).
-    /// </summary>
     private void LoadYesterdayData()
     {
         var config   = AppConfigLoader.Load();
@@ -359,9 +404,7 @@ public class MainViewModel : ViewModelBase
         string   fileName  = GenericExcelWriter.ApplyDatePattern(dailyDoc.OutputPattern, yesterday);
         string   filePath  = Path.Combine(
                                  AppDomain.CurrentDomain.BaseDirectory,
-                                 config.OutputFolder,
-                                 fileName);
-
+                                 config.OutputFolder, fileName);
         if (!File.Exists(filePath)) return;
 
         try
@@ -375,7 +418,6 @@ public class MainViewModel : ViewModelBase
             var eqField = dailyDoc.Fields.FirstOrDefault(f => f.Type == FormFiller.Core.Config.FieldTypes.EquipmentTable);
             var pnField = dailyDoc.Fields.FirstOrDefault(f => f.Type == FormFiller.Core.Config.FieldTypes.PersonnelTable);
 
-            // ── 장비 누계 읽기 (todayCol 에서 두 열 오른쪽 = 누계 열) ──
             if (eqField != null && !string.IsNullOrEmpty(eqField.NameCol)
                                 && !string.IsNullOrEmpty(eqField.TodayCol))
             {
@@ -384,15 +426,12 @@ public class MainViewModel : ViewModelBase
                 {
                     string? name = CellHelper.GetCellValue(wsPart, $"{eqField.NameCol}{row}");
                     if (string.IsNullOrWhiteSpace(name)) continue;
-
                     var vm = Equipment.FirstOrDefault(e => Norm(e.Name) == Norm(name));
                     if (vm == null) continue;
-
                     vm.PrevDayCount = CellHelper.GetCellInt(wsPart, $"{cumCol}{row}") ?? 0;
                 }
             }
 
-            // ── 인원 총누계 읽기 (todayCol 에서 두 열 오른쪽 = 총누계 열) ──
             if (pnField != null && !string.IsNullOrEmpty(pnField.RoleCol)
                                 && !string.IsNullOrEmpty(pnField.TodayCol))
             {
@@ -401,34 +440,21 @@ public class MainViewModel : ViewModelBase
                 {
                     string? role = CellHelper.GetCellValue(wsPart, $"{pnField.RoleCol}{row}");
                     if (string.IsNullOrWhiteSpace(role)) continue;
-
                     var vm = Personnel.FirstOrDefault(p => Norm(p.Role) == Norm(role));
                     if (vm == null) continue;
-
                     vm.PrevCumulativeCount = CellHelper.GetCellInt(wsPart, $"{cumCol}{row}") ?? 0;
                 }
             }
         }
-        catch
-        {
-            // 읽기 오류 시 조용히 무시 — 0 값 유지
-        }
+        catch { /* 읽기 오류 시 0 유지 */ }
     }
 
-    /// <summary>
-    /// 열 문자를 두 칸 오른쪽으로 이동한다.
-    /// 예) "H" → "J",  "P" → "R"
-    /// </summary>
     private static string NextNextColumn(string col)
     {
         uint idx = CellHelper.ColLetterToIndex(col);
         return ColIndexToLetter(idx + 2);
     }
 
-    /// <summary>
-    /// 1-based 열 인덱스를 열 문자열로 변환한다.
-    /// 예) 1→"A", 26→"Z", 27→"AA"
-    /// </summary>
     private static string ColIndexToLetter(uint index)
     {
         string result = "";
@@ -441,99 +467,67 @@ public class MainViewModel : ViewModelBase
         return result;
     }
 
-    /// <summary>이름/직종 비교를 위한 정규화: 앞뒤 공백 제거 + 소문자 변환</summary>
     private static string Norm(string s) => s.Trim().ToLowerInvariant();
 
-    // ── 사진 슬롯 로드 ────────────────────────────────────────────
+    // ── 사진 슬롯 ────────────────────────────────────────────────────
 
-    /// <summary>
-    /// config.json의 각 문서에서 PhotoSheet가 설정된 경우
-    /// 해당 시트의 이미지 슬롯을 자동 감지해 PhotoSlots를 채운다.
-    /// </summary>
     private void LoadPhotoSlots()
     {
         PhotoSlots.Clear();
-
         var    config  = AppConfigLoader.Load();
         string baseDir = AppDomain.CurrentDomain.BaseDirectory;
 
         foreach (var doc in config.Documents)
         {
             if (string.IsNullOrWhiteSpace(doc.PhotoSheet)) continue;
-
             string templatePath = Path.IsPathRooted(doc.TemplateFile)
                 ? doc.TemplateFile
                 : Path.Combine(baseDir, doc.TemplateFile);
-
             if (!File.Exists(templatePath)) continue;
 
             var slotInfos = ExcelPhotoWriter.GetPhotoSlotInfos(templatePath, doc.PhotoSheet);
-
             foreach (var info in slotInfos)
             {
-                // config에 저장된 슬롯 이름이 있으면 사용, 없으면 "사진 N"
                 string? savedLabel = doc.PhotoSlots
                     .FirstOrDefault(s => s.Index == info.SlotIndex)?.Label;
-
                 var slot = new PhotoSlotViewModel(
                     doc.Id, doc.PhotoSheet, info.SlotIndex,
                     info.WidthPx, info.HeightPx, savedLabel);
                 PhotoSlots.Add(slot);
             }
         }
-
         OnPropertyChanged(nameof(HasPhotoSlots));
     }
 
-    // ── 사진 삽입 ────────────────────────────────────────────────
+    // ── 사진 삽입 ────────────────────────────────────────────────────
 
-    /// <summary>
-    /// 선택된 사진 슬롯을 처리해 각 output 파일에 삽입한다.
-    ///
-    /// [흐름]
-    /// 1. PhotoSlots에서 SelectedImagePath가 있는 슬롯만 추출
-    /// 2. 해당 문서의 output 파일 경로 조회
-    /// 3. PhotoService.ResizeToFill로 가득채우기 리사이즈
-    /// 4. ExcelPhotoWriter.ReplacePhoto로 xlsx에 삽입
-    /// </summary>
     private void InsertPhotos(
         List<DocumentDueItem> checkedDocs,
         AppConfig config,
         string baseDir,
         List<string> results)
     {
-        var filledSlots = PhotoSlots
-            .Where(s => s.HasPhoto)
-            .ToList();
-
+        var filledSlots = PhotoSlots.Where(s => s.HasPhoto).ToList();
         if (filledSlots.Count == 0) return;
 
         foreach (var slot in filledSlots)
         {
-            // 이 슬롯이 속한 문서의 output 경로 찾기
             var docConfig = config.Documents.FirstOrDefault(d => d.Id == slot.DocumentId);
             if (docConfig == null) continue;
-
-            // 체크된 문서에 포함되어 있어야 함
             var dueItem = checkedDocs.FirstOrDefault(d => d.Config.Id == slot.DocumentId);
             if (dueItem == null) continue;
 
             string outputFileName = GenericExcelWriter.ApplyDatePattern(
                 docConfig.OutputPattern, TargetDate);
             string outputPath = Path.Combine(baseDir, config.OutputFolder, outputFileName);
-
             if (!File.Exists(outputPath)) continue;
 
             try
             {
-                // 가득채우기 리사이즈 → JPEG 바이너리
                 byte[] imageBytes = PhotoService.ResizeToFill(
                     slot.SelectedImagePath!, slot.TargetWidthPx, slot.TargetHeightPx);
-
-                // xlsx 이미지 슬롯 교체
                 ExcelPhotoWriter.ReplacePhoto(
                     outputPath, slot.SheetName, slot.SlotIndex, imageBytes);
-
                 results.Add($"  └ 사진 삽입: {slot.Label} → {slot.SheetName}");
             }
             catch (Exception ex)

@@ -12,8 +12,33 @@ public class DailyInput
     /// <summary>날씨 (예: "맑음", "흐림")</summary>
     public string Weather { get; set; } = "";
 
-    /// <summary>금일 작업사항 (줄바꿈 포함 자유 텍스트)</summary>
-    public string TodayWork { get; set; } = "";
+    /// <summary>금일 오전 작업사항</summary>
+    public string TodayMorningWork { get; set; } = "";
+
+    /// <summary>금일 오후 작업사항</summary>
+    public string TodayAfternoonWork { get; set; } = "";
+
+    /// <summary>
+    /// 금일 작업사항 전체 (오전+오후 합산). 기존 today_work 필드 호환용.
+    /// </summary>
+    public string TodayWork
+    {
+        get
+        {
+            var parts = new List<string>();
+            if (!string.IsNullOrWhiteSpace(TodayMorningWork))
+                parts.Add(TodayMorningWork);
+            if (!string.IsNullOrWhiteSpace(TodayAfternoonWork))
+                parts.Add(TodayAfternoonWork);
+            return string.Join("\n", parts);
+        }
+        set
+        {
+            // 하위 호환: 단순히 오전에 모두 넣음
+            TodayMorningWork = value;
+            TodayAfternoonWork = "";
+        }
+    }
 
     /// <summary>명일 작업사항</summary>
     public string TomorrowWork { get; set; } = "";

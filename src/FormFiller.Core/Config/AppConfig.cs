@@ -11,6 +11,30 @@ public class AppConfig
 
     /// <summary>처리할 문서 목록. config.json 의 "documents" 배열에 대응.</summary>
     public List<DocumentConfig> Documents { get; set; } = [];
+
+    /// <summary>
+    /// 작업사항 항목 선택 팝업에서 보여줄 미리 설정된 작업 목록.
+    /// 사용자가 추가·수정·삭제 가능.
+    /// </summary>
+    public List<string> PresetWorkItems { get; set; } =
+    [
+        "굴삭기 작업",
+        "철거 작업",
+        "자재 반출",
+        "안전 점검",
+        "현장 정리",
+        "콘크리트 타설",
+        "배관 작업",
+        "전기 작업",
+        "가설 울타리 설치",
+        "폐기물 처리",
+    ];
+
+    /// <summary>
+    /// Claude AI 채팅 기능에 사용할 Anthropic API 키.
+    /// 비어 있으면 AI 기능 비활성화. 절대 git에 올리지 말 것.
+    /// </summary>
+    public string ClaudeApiKey { get; set; } = "";
 }
 
 /// <summary>
@@ -57,6 +81,13 @@ public class DocumentConfig
     /// false: 공사인원만 사용 (공사일보, 출력일보 등)
     /// </summary>
     public bool IncludesSujangjae { get; set; } = false;
+
+    /// <summary>
+    /// 파일 저장 방식.
+    /// "create": 템플릿 복사 후 새 파일 생성 (기본값, 공사일보 등)
+    /// "update": 기존 출력 파일을 직접 수정 (노임대장 등 누적 파일)
+    /// </summary>
+    public string SaveMode { get; set; } = "create";
 
     /// <summary>
     /// 사진을 삽입할 시트 이름 (예: "사진대지").
