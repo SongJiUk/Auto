@@ -53,7 +53,7 @@
 
 ---
 
-## 마지막 작업 (2026-11-05)
+## 마지막 작업 (2026-11-08)
 
 ### 완료된 것
 
@@ -89,21 +89,36 @@
 - **+ 필드 추가** 버튼: 필드명 입력 + 타입 선택 (10가지 타입)
 - 저장 → config.json에 자동 추가
 
-### 완료된 사진 기능 (2026-11-05)
+### 완료된 사진 기능 (이전)
 - `ExcelPhotoWriter` — xlsx 이미지 슬롯 감지 + 바이너리 교체 + 썸네일 읽기
 - `PhotoService` — 가득채우기(ResizeToFill) + 썸네일 로드
 - 메인 화면 사진 카드 UI — 드래그&드롭 + 파일 선택 + 썸네일 미리보기
 - 설정 화면 — 사진 시트 콤보박스 + 슬롯별 플레이스홀더 썸네일 + 이름 붙이기
 - config.json — `photoSheet`, `photoSlots[{index, label}]` 저장
 
+### 완료된 기능 (2026-11-08)
+- 장비 투입현황: 장비명·규격 셀 편집, 전일 직접 수정, + 장비 추가, × 삭제
+- 인원 투입현황: 직종 편집, 전일누계 직접 수정, + 직종 추가, × 삭제 (공사팀·수장재팀 동일)
+- 작업사항: 오전/오후 탭 분리 (TabControl), "☰ 항목 선택" 팝업
+  - WorkItemPickerWindow: preset 체크박스 선택 + 직접 입력 + 목록 추가/삭제
+  - config.json PresetWorkItems에 영구 저장
+- AI 도우미 창 (AiAssistantWindow): Anthropic API 직접 호출
+  - 현장 컨텍스트(날짜·작업·장비·인원) 자동 주입
+  - API Key config.json ClaudeApiKey 에 저장
+- AppConfig: PresetWorkItems, SaveMode, ClaudeApiKey 추가
+- DailyInput: TodayMorningWork / TodayAfternoonWork 분리
+
 ### 다음 작업 (우선순위 순)
 1. **실제 사용 테스트** — 서식 파일 등록 → 생성 버튼 → 출력 파일 확인
-2. **출력일보 직접 입력** — 별도 입력 필드 미구현
-3. **한글(hwpx) 지원** — 4단계
+2. **노임대장 저장 모드** — SaveMode="update" 로 기존 파일 직접 수정 (날짜 열에 1 쓰기)
+3. **새 문서 추가 UI 개선** — 엑셀 색칠된 셀 자동 감지, 필드 후보 하이라이트
+4. **출력일보 직접 입력** — 별도 입력 필드 미구현
+5. **한글(hwpx) 지원** — 4단계
 
 ### 현재 미완성 / 알려진 이슈
 - 한글(hwpx) 미지원 (4단계)
 - 출력일보 직접 입력 미구현
+- 노임대장 SaveMode="update" 엔진 미구현 (config 필드만 추가됨)
 
 ### 아직 미결 질문들
 - 수장재팀이 공사일보 인원 투입현황에 들어가는지 여부
