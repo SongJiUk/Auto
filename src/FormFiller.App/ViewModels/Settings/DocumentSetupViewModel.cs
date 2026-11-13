@@ -640,7 +640,7 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
             {
                 Id                = id,
                 Name              = DocumentName.Trim(),
-                TemplateFile      = _filePath,
+                TemplateFile      = AppConfigLoader.ToStoredTemplatePath(_filePath),
                 OutputPattern     = OutputPattern.Trim(),
                 SheetName         = sheets.FirstOrDefault() ?? "",
                 SheetNames        = sheets.Count > 1 ? sheets : [],

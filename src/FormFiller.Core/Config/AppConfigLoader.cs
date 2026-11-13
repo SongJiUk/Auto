@@ -63,6 +63,41 @@ public static class AppConfigLoader
         File.WriteAllText(path, json, System.Text.Encoding.UTF8);
     }
 
+    // ── 서식 경로 (두 PC 에서 같은 설정을 쓰기 위해) ───────────────────
+
+    /// <summary>서식 파일을 모아 두는 폴더 이름 (exe 옆)</summary>
+    public const string TemplateFolder = "서식";
+
+    /// <summary>상대 경로면 exe 위치 기준 절대 경로로 바꾼다.</summary>
+    public static string ResolvePath(string path) =>
+        string.IsNullOrWhiteSpace(path) || Path.IsPathRooted(path)
+            ? path
+            : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, path);
+
+    /// <summary>
+    /// 설정에 저장할 서식 경로를 만든다.
+    /// exe 폴더 밖의 파일이면 exe 옆 "서식" 폴더로 복사하고, 항상 exe 기준 상대 경로를 돌려준다.
+    /// 그래서 프로그램 폴더째 구글 드라이브에 두면 다른 PC(드라이브 문자가 달라도)에서 그대로 열린다.
+    /// </summary>
+    public static string ToStoredTemplatePath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return path;
+        string baseDir = Path.GetFullPath(AppDomain.CurrentDomain.BaseDirectory);
+        string full = Path.GetFullPath(ResolvePath(path));
+
+        if (!full.StartsWith(baseDir, StringComparison.OrdinalIgnoreCase))
+        {
+            if (!File.Exists(full)) return path;   // 없는 파일은 그대로 둔다
+            string dir = Path.Combine(baseDir, TemplateFolder);
+            Directory.CreateDirectory(dir);
+            string dest = Path.Combine(dir, Path.GetFileName(full));
+            // 원본은 건드리지 않고 복사만 한다. 같은 이름이 있으면 새 것으로 덮어쓴다.
+            File.Copy(full, dest, overwrite: true);
+            full = dest;
+        }
+        return Path.GetRelativePath(baseDir, full);
+    }
+
     // ── private 헬퍼 ─────────────────────────────────────────────────
 
     /// <summary>

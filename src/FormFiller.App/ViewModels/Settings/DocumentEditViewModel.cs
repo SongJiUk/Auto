@@ -163,9 +163,10 @@ public class DocumentEditViewModel : ViewModelBase
     private void ReloadSheets()
     {
         SheetNames.Clear();
-        if (!string.IsNullOrWhiteSpace(_templateFile) && File.Exists(_templateFile))
+        string path = AppConfigLoader.ResolvePath(_templateFile);
+        if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
         {
-            foreach (var s in ExcelAnalyzer.GetSheetNames(_templateFile))
+            foreach (var s in ExcelAnalyzer.GetSheetNames(path))
                 SheetNames.Add(s);
 
             if (!SheetNames.Contains(_selectedSheet) && SheetNames.Count > 0)
@@ -193,20 +194,21 @@ public class DocumentEditViewModel : ViewModelBase
         var currentLabels = PhotoSlotRows.ToDictionary(r => r.SlotIndex, r => r.Label);
         PhotoSlotRows.Clear();
 
+        string path = AppConfigLoader.ResolvePath(_templateFile);
         if (string.IsNullOrEmpty(PhotoSheet)
-            || string.IsNullOrWhiteSpace(_templateFile)
-            || !File.Exists(_templateFile)) return;
+            || string.IsNullOrWhiteSpace(path)
+            || !File.Exists(path)) return;
 
         try
         {
-            var slotInfos = ExcelPhotoWriter.GetPhotoSlotInfos(_templateFile, PhotoSheet);
+            var slotInfos = ExcelPhotoWriter.GetPhotoSlotInfos(path, PhotoSheet);
             foreach (var slot in slotInfos)
             {
                 // 우선순위: 현재 편집값 > config 저장값 > 빈 문자열
                 string label = currentLabels.TryGetValue(slot.SlotIndex, out var cur) ? cur
                              : _initialSlotLabels.TryGetValue(slot.SlotIndex, out var init) ? init
                              : "";
-                byte[]? imgBytes = ExcelPhotoWriter.GetSlotImageBytes(_templateFile, PhotoSheet, slot.SlotIndex);
+                byte[]? imgBytes = ExcelPhotoWriter.GetSlotImageBytes(path, PhotoSheet, slot.SlotIndex);
                 PhotoSlotRows.Add(new PhotoSlotLabelRow(slot.SlotIndex, slot.WidthPx, slot.HeightPx, label, imgBytes));
             }
         }
@@ -218,7 +220,7 @@ public class DocumentEditViewModel : ViewModelBase
     {
         Id                = Id,
         Name              = Name,
-        TemplateFile      = TemplateFile,
+        TemplateFile      = AppConfigLoader.ToStoredTemplatePath(TemplateFile),
         OutputPattern     = OutputPattern,
         SheetName         = SelectedSheet,
         Frequency         = _selectedFrequency?.Value ?? "daily",
