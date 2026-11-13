@@ -141,10 +141,15 @@
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="{Binding Name}" FontWeight="Bold" FontSize="14"
                                    Foreground="#2D3748" VerticalAlignment="Center"/>
+                        <Button Content="✏ Excel 에서 편집"
+                                Click="EditDocument_Click" Tag="{Binding}"
+                                Margin="12,0,0,0" Padding="8,2" VerticalAlignment="Center"
+                                Background="#EBF8FF" Foreground="#2B6CB0" BorderBrush="#90CDF4" Cursor="Hand"
+                                ToolTip="서식을 열어 칸·사진·위치를 클릭으로 다시 지정합니다"/>
                         <Button Content="✕ 삭제"
                                 Command="{Binding DeleteDocumentCommand}"
                                 Style="{StaticResource DeleteBtn}"
-                                Margin="12,0,0,0" VerticalAlignment="Center"/>
+                                Margin="8,0,0,0" VerticalAlignment="Center"/>
                     </StackPanel>
                 </GroupBox.Header>
 

@@ -71,6 +71,25 @@ public class DailyInput
     /// <summary>공사 인원 합계 (수장재 제외)</summary>
     public int TotalPersonnelWithoutSujangjae
         => Personnel.Sum(p => p.TodayCount);
+
+    // ── 문서별 직접 입력 값 (input / photo / shape_position 필드) ─────
+
+    /// <summary>
+    /// 문서·시트·필드마다 따로 받는 값. 키는 Key(문서, 시트, 필드) 로 만든다.
+    /// - input          : 입력한 글자 (단위 제외, 예: "55.3")
+    /// - photo          : 사진 파일 경로
+    /// - photo 의 측정값 : Key(..., 필드 + ValueSuffixKey) 에 입력한 글자
+    /// - shape_position : 고른 위치 이름
+    /// </summary>
+    public Dictionary<string, string> DocValues { get; set; } = [];
+
+    /// <summary>photo 필드의 짝 값(측정값)을 저장할 때 필드 ID 뒤에 붙이는 표시</summary>
+    public const string ValueSuffixKey = "#value";
+
+    public static string Key(string docId, string sheet, string fieldId) => $"{docId}|{sheet}|{fieldId}";
+
+    public string GetDocValue(string docId, string sheet, string fieldId)
+        => DocValues.TryGetValue(Key(docId, sheet, fieldId), out var v) ? v : "";
 }
 
 /// <summary>

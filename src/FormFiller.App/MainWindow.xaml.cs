@@ -22,6 +22,21 @@ public partial class MainWindow : Window
     {
         var win = new SettingsWindow { Owner = this };
         win.ShowDialog();
+
+        // 설정에서 문서를 추가·편집했을 수 있으므로 문서 목록과 입력 칸을 다시 읽는다
+        (DataContext as MainViewModel)?.ReloadDocuments();
+    }
+
+    // ── 문서별 입력: 사진 칸 드래그&드롭 ──────────────────────────────
+
+    private void DocPhoto_Drop(object sender, DragEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: FieldInputViewModel item }
+            && e.Data.GetData(DataFormats.FileDrop) is string[] { Length: > 0 } files)
+        {
+            item.SetPhoto(files[0]);
+            e.Handled = true;
+        }
     }
 
     // ── 사진 슬롯 드래그&드롭 ────────────────────────────────────────

@@ -60,6 +60,27 @@ public class MainViewModel : ViewModelBase
     public ObservableCollection<PhotoSlotViewModel> PhotoSlots { get; } = [];
     public bool HasPhotoSlots => PhotoSlots.Count > 0;
 
+    // 문서별 입력 (소음측정 사진·측정값·장비 위치 등, 시트마다 따로)
+    public ObservableCollection<DocInputCardViewModel> DocInputCards { get; } = [];
+    public bool HasDocInputs => DocInputCards.Count > 0;
+
+    /// <summary>설정이 바뀐 뒤(문서 추가·편집) 메인 화면의 문서 목록·입력 칸을 다시 읽는다.</summary>
+    public void ReloadDocuments()
+    {
+        LoadDocumentDueList();
+        LoadPhotoSlots();
+        LoadDocInputCards();
+    }
+
+    private void LoadDocInputCards()
+    {
+        DocInputCards.Clear();
+        foreach (var doc in AppConfigLoader.Load().Documents
+                     .Where(d => d.Fields.Any(f => FieldTypes.IsDailyInput(f.Type))))
+            DocInputCards.Add(new DocInputCardViewModel(doc, () => TargetDate));
+        OnPropertyChanged(nameof(HasDocInputs));
+    }
+
     // ── 합계 (읽기 전용) ──────────────────────────────────────────────
     public int TotalTodayEquipment  => Equipment.Sum(e => e.TodayCount);
     public int TotalTodayPersonnel  => Personnel.Sum(p => p.TodayCount);
@@ -117,6 +138,7 @@ public class MainViewModel : ViewModelBase
         LoadYesterdayData();
         LoadDocumentDueList();
         LoadPhotoSlots();
+        LoadDocInputCards();
     }
 
     // ── 기본 장비·인원 초기화 ────────────────────────────────────────
@@ -275,15 +297,24 @@ public class MainViewModel : ViewModelBase
                 GenericExcelWriter.LoadPreviousDay(prevPath, input, dailyDoc);
             }
 
+            foreach (var card in DocInputCards)
+                card.FillInput(input);
+
             var results = new List<string>();
+            var notes   = new List<string>();
             foreach (var dueItem in checkedDocs)
             {
                 string outputPath = GenericExcelWriter.Generate(
-                    input, dueItem.Config, baseDir, config.OutputFolder);
+                    input, dueItem.Config, baseDir, config.OutputFolder,
+                    PhotoService.ResizeToCover, notes);
                 results.Add($"{dueItem.Name}: {Path.GetFileName(outputPath)}");
             }
 
             InsertPhotos(checkedDocs, config, baseDir, results);
+
+            if (notes.Count > 0)
+                results.Add("\n참고:\n" + string.Join("\n", notes.Take(15))
+                            + (notes.Count > 15 ? $"\n… 외 {notes.Count - 15}건" : ""));
 
             string summary = string.Join("\n", results.Prepend("파일 생성 완료!\n"));
             MessageBox.Show(summary, "완료", MessageBoxButton.OK, MessageBoxImage.Information);

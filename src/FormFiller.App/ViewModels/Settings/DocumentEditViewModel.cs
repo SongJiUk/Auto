@@ -114,8 +114,12 @@ public class DocumentEditViewModel : ViewModelBase
 
     // ── 생성자 ──────────────────────────────────────────────────────
 
+    /// <summary>불러온 원본 (이 화면에서 다루지 않는 값 — 여러 시트, 사진 폴더 등 — 을 저장 때 그대로 보존)</summary>
+    private readonly DocumentConfig _original;
+
     public DocumentEditViewModel(DocumentConfig doc, Action<DocumentEditViewModel> onDelete)
     {
+        _original          = doc;
         Id                 = doc.Id;
         _name              = doc.Name;
         _templateFile      = doc.TemplateFile;
@@ -223,5 +227,9 @@ public class DocumentEditViewModel : ViewModelBase
         PhotoSheet        = PhotoSheet,
         PhotoSlots        = PhotoSlotRows.Select(r => r.ToConfig()).ToList(),
         Fields            = Fields.Select(f => f.ToFieldConfig()).ToList(),
+        // 이 화면에서 편집하지 않는 값은 원본 그대로
+        SheetNames        = _original.SheetNames.Contains(SelectedSheet) ? _original.SheetNames : [],
+        PhotoFolder       = _original.PhotoFolder,
+        SaveMode          = _original.SaveMode,
     };
 }

@@ -68,8 +68,12 @@ public class FieldEditRow : ViewModelBase
 
     // ── 생성자 ──────────────────────────────────────────────────────
 
+    /// <summary>불러온 원본 (사진·위치·단위 등 이 화면에서 다루지 않는 값을 보존)</summary>
+    private readonly FieldConfig _orig;
+
     public FieldEditRow(FieldConfig f)
     {
+        _orig   = f;
         FieldId = f.Id;
         Label   = f.Label;
         Type    = f.Type;
@@ -92,6 +96,23 @@ public class FieldEditRow : ViewModelBase
 
     /// <summary>현재 편집 상태를 FieldConfig로 변환한다.</summary>
     public FieldConfig ToFieldConfig()
+    {
+        var fc = BuildFieldConfig();
+        // 이 화면에서 편집하지 않는 값은 원본 그대로 보존
+        fc.Suffix      = _orig.Suffix;
+        fc.ValueCell   = _orig.ValueCell;
+        fc.Time        = _orig.Time;
+        fc.ShapeNames  = _orig.ShapeNames;
+        fc.Presets     = _orig.Presets;
+        fc.Placeholder = _orig.Placeholder;
+        // 여러 줄 칸: 시작 칸을 안 바꿨으면 원래 칸 목록(줄 수 포함) 유지
+        if (Type == FieldTypes.Multiline && _orig.Cells is { Count: > 0 }
+            && string.Equals(_orig.Cells[0], _cellAddress, StringComparison.OrdinalIgnoreCase))
+            fc.Cells = _orig.Cells;
+        return fc;
+    }
+
+    private FieldConfig BuildFieldConfig()
     {
         if (IsTableType)
         {

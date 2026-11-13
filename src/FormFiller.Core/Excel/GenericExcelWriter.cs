@@ -109,8 +109,15 @@ public static class GenericExcelWriter
     /// <param name="docConfig">처리할 문서 설정</param>
     /// <param name="baseDir">exe 위치 (상대경로 기준점)</param>
     /// <param name="outputFolder">출력 폴더명 (baseDir 기준 상대경로)</param>
+    /// <param name="photoLoader">
+    /// (사진 경로, 너비 px, 높이 px) → JPEG 바이트. photo 필드가 있을 때 사진을 칸 크기에 맞춰 줄이는 함수.
+    /// (사진 처리는 화면 쪽(WPF) 기능이라 App 에서 넘겨받는다)
+    /// </param>
+    /// <param name="notes">사용자에게 보여 줄 참고 사항(빈 칸 등)을 모을 목록 (선택)</param>
     public static string Generate(DailyInput input, DocumentConfig docConfig,
-                                  string baseDir, string outputFolder)
+                                  string baseDir, string outputFolder,
+                                  Func<string, int, int, byte[]>? photoLoader = null,
+                                  List<string>? notes = null)
     {
         // ── 1. 경로 계산 ─────────────────────────────────────────────
         string templatePath = Path.Combine(baseDir, docConfig.TemplateFile);
@@ -120,6 +127,14 @@ public static class GenericExcelWriter
 
         string outputPath = BuildOutputPath(input.Date, docConfig.OutputPattern, baseDir, outputFolder);
 
+        // 한글(hwpx) 서식은 별도 엔진으로 처리
+        if (HwpxWriter.IsHwpx(templatePath))
+        {
+            EnsureDirectoryExists(outputPath);
+            HwpxWriter.Generate(templatePath, outputPath, docConfig, input, notes);
+            return outputPath;
+        }
+
         // ── 2. 원본 복사 — samples/ 는 절대 수정하지 않는다 ──────────
         EnsureDirectoryExists(outputPath);
         File.Copy(templatePath, outputPath, overwrite: true);
@@ -127,13 +142,18 @@ public static class GenericExcelWriter
         // ── 3. 복사본을 편집 모드로 열기 ─────────────────────────────
         using var doc    = SpreadsheetDocument.Open(outputPath, isEditable: true);
         var       wbPart = doc.WorkbookPart!;
-        var       wsPart = CellHelper.FindWorksheetPart(wbPart, docConfig.SheetName)
-                           ?? throw new InvalidOperationException(
-                                  $"시트 '{docConfig.SheetName}'를 찾을 수 없습니다.\n파일: {outputPath}");
 
-        // ── 4. fields 순회: 타입별 처리 ──────────────────────────────
-        foreach (var field in docConfig.Fields)
-            WriteField(field, input, docConfig, doc, wsPart);
+        // ── 4. 시트마다 fields 순회 (같은 모양 시트 여러 개면 모두 채운다) ─
+        foreach (string sheet in docConfig.TargetSheets())
+        {
+            var wsPart = CellHelper.FindWorksheetPart(wbPart, sheet)
+                         ?? throw new InvalidOperationException(
+                                $"시트 '{sheet}'를 찾을 수 없습니다.\n파일: {outputPath}");
+
+            var ctx = new WriteContext(input, docConfig, sheet, doc, wsPart, photoLoader, notes);
+            foreach (var field in docConfig.Fields)
+                WriteField(field, ctx);
+        }
 
         // ── 5. 수식 재계산 플래그 설정 (J열·R열·합계행 수식 보장) ────
         CellHelper.SetFullCalcOnLoad(wbPart);
@@ -142,38 +162,95 @@ public static class GenericExcelWriter
         return outputPath;
     }
 
+    /// <summary>필드 하나를 쓸 때 필요한 정보 묶음</summary>
+    private sealed record WriteContext(
+        DailyInput Input, DocumentConfig Doc, string Sheet,
+        SpreadsheetDocument Package, WorksheetPart Ws,
+        Func<string, int, int, byte[]>? PhotoLoader, List<string>? Notes);
+
+    /// <summary>
+    /// 단순 값 필드(날짜·텍스트·직접 입력 등)의 글자 값을 구한다. 엑셀과 한글 엔진이 함께 쓴다.
+    /// 값이 없는 타입이면 null.
+    /// </summary>
+    public static string? GetSimpleValue(FieldConfig field, DailyInput input, string docId, string sheet) =>
+        field.Type switch
+        {
+            FieldTypes.DateKorean           => FormatKoreanDate(input.Date),
+            FieldTypes.DateSimple           => input.Date.ToString("yyyy.MM.dd"),
+            FieldTypes.Text                 => GetTextValue(field.Id, input),
+            FieldTypes.Multiline            => GetMultilineValue(field.Id, input),
+            FieldTypes.ActiveEquipmentNames => string.Join(", ",
+                                                   input.Equipment.Where(e => e.TodayCount > 0).Select(e => e.Name)),
+            FieldTypes.TbmPersonnel         => input.TotalPersonnelWithSujangjae.ToString(),
+            FieldTypes.AttendanceRate       => "100",
+            FieldTypes.Input                => WithSuffix(input.GetDocValue(docId, sheet, field.Id), field.Suffix),
+            _                               => null,
+        };
+
+    /// <summary>값 뒤에 단위를 붙인다. 비어 있거나 이미 붙어 있으면 그대로.</summary>
+    public static string WithSuffix(string value, string? suffix)
+    {
+        value = value.Trim();
+        if (value.Length == 0 || string.IsNullOrEmpty(suffix)) return value;
+        return value.EndsWith(suffix, StringComparison.OrdinalIgnoreCase) ? value : value + suffix;
+    }
+
+    /// <summary>문자열을 쓰되, 수식 셀이면 건드리지 않는다.</summary>
+    private static void WriteString(WriteContext c, string? cell, string value)
+    {
+        if (string.IsNullOrEmpty(cell) || CellHelper.HasFormula(c.Ws, cell)) return;
+        CellHelper.SetCellString(c.Package, c.Ws, cell, value);
+    }
+
     // ── 타입별 처리 ───────────────────────────────────────────────────
 
     /// <summary>
     /// 단일 FieldConfig 를 타입에 따라 처리한다.
     /// docConfig.IncludesSujangjae 로 인원 테이블 범위를 결정한다.
     /// </summary>
-    private static void WriteField(FieldConfig field, DailyInput input,
-                                   DocumentConfig docConfig,
-                                   SpreadsheetDocument doc, WorksheetPart wsPart)
+    private static void WriteField(FieldConfig field, WriteContext c)
     {
+        var input     = c.Input;
+        var docConfig = c.Doc;
+        var doc       = c.Package;
+        var wsPart    = c.Ws;
+
         switch (field.Type)
         {
-            // ── 날짜: "2026년 11월 05일 목요일" ──────────────────────
+            // ── 날짜·텍스트: 수식 셀(다른 시트 날짜를 참조하는 칸 등)은 건드리지 않는다 ──
             case FieldTypes.DateKorean:
-                if (!string.IsNullOrEmpty(field.Cell))
-                    CellHelper.SetCellString(doc, wsPart, field.Cell,
-                                             FormatKoreanDate(input.Date));
-                break;
-
-            // ── 날짜: "2026.11.05" ────────────────────────────────────
             case FieldTypes.DateSimple:
-                if (!string.IsNullOrEmpty(field.Cell))
-                    CellHelper.SetCellString(doc, wsPart, field.Cell,
-                                             input.Date.ToString("yyyy.MM.dd"));
+            case FieldTypes.Text:
+                WriteString(c, field.Cell, GetSimpleValue(field, input, docConfig.Id, c.Sheet) ?? "");
                 break;
 
-            // ── 텍스트 ───────────────────────────────────────────────
-            case FieldTypes.Text:
-                if (!string.IsNullOrEmpty(field.Cell))
-                    CellHelper.SetCellString(doc, wsPart, field.Cell,
-                                             GetTextValue(field.Id, input));
+            // ── 직접 입력 값 (예: 측정값 "55.3" → "55.3dB") ─────────
+            case FieldTypes.Input:
+            {
+                string v = GetSimpleValue(field, input, docConfig.Id, c.Sheet) ?? "";
+                if (v.Length > 0) WriteString(c, field.Cell, v);
+                else c.Notes?.Add($"[{c.Sheet}] {field.Label}: 입력 없음 → 서식 값 그대로");
                 break;
+            }
+
+            // ── 사진 칸 (+ 짝이 되는 측정값 칸) ─────────────────────
+            case FieldTypes.Photo:
+                WritePhoto(field, c);
+                break;
+
+            // ── 그림·글상자 위치 ─────────────────────────────────────
+            case FieldTypes.ShapePosition:
+            {
+                string name   = input.GetDocValue(docConfig.Id, c.Sheet, field.Id);
+                var    preset = field.Presets?.FirstOrDefault(p => p.Name == name);
+                if (preset != null)
+                {
+                    if (ExcelDrawingHelper.ApplyPreset(wsPart, preset) < preset.Shapes.Count)
+                        c.Notes?.Add($"[{c.Sheet}] {field.Label}: 일부 그림을 이 시트에서 찾지 못함");
+                }
+                else if (name.Length > 0) c.Notes?.Add($"[{c.Sheet}] {field.Label}: 저장된 위치 '{name}' 없음");
+                break;
+            }
 
             // ── 멀티라인 텍스트 → 셀 범위에 나눠 쓰기 ───────────────
             case FieldTypes.Multiline:
@@ -213,6 +290,35 @@ public static class GenericExcelWriter
                 if (!string.IsNullOrEmpty(field.Cell))
                     CellHelper.SetCellInt(wsPart, field.Cell, 100);
                 break;
+        }
+    }
+
+    /// <summary>
+    /// 사진 칸: 그 칸에 놓인 기존 그림을 새 사진으로 바꾸고, 짝 값 칸(ValueCell)이 있으면 측정값도 쓴다.
+    /// 사진이 없으면 서식의 그림을 그대로 둔다.
+    /// </summary>
+    private static void WritePhoto(FieldConfig field, WriteContext c)
+    {
+        string docId = c.Doc.Id;
+        string path  = c.Input.GetDocValue(docId, c.Sheet, field.Id);
+
+        if (!string.IsNullOrEmpty(field.Cell))
+        {
+            if (path.Length > 0 && File.Exists(path) && c.PhotoLoader != null)
+            {
+                bool ok = ExcelDrawingHelper.ReplacePictureAt(c.Ws, field.Cell,
+                    (w, h) => c.PhotoLoader(path, w, h));
+                if (!ok) c.Notes?.Add($"[{c.Sheet}] {field.Label}: {field.Cell} 칸에 그림이 없어 사진을 넣지 못함");
+            }
+            else
+                c.Notes?.Add($"[{c.Sheet}] {field.Label}: 사진 없음 → 서식 그림 그대로");
+        }
+
+        if (!string.IsNullOrEmpty(field.ValueCell))
+        {
+            string v = WithSuffix(c.Input.GetDocValue(docId, c.Sheet, field.Id + DailyInput.ValueSuffixKey), field.Suffix);
+            if (v.Length > 0) WriteString(c, field.ValueCell, v);
+            else c.Notes?.Add($"[{c.Sheet}] {field.Label}: 측정값 없음 → 서식 값 그대로");
         }
     }
 
@@ -347,7 +453,7 @@ public static class GenericExcelWriter
     /// 날짜를 한국어 요일 포함 형식으로 변환한다.
     /// 예) 2026-11-05 → "2026년 11월 05일 목요일"
     /// </summary>
-    private static string FormatKoreanDate(DateTime date)
+    public static string FormatKoreanDate(DateTime date)
     {
         string dayOfWeek = KoreanDays[(int)date.DayOfWeek];
         return $"{date:yyyy년 MM월 dd일} {dayOfWeek}요일";

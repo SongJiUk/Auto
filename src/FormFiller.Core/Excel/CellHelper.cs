@@ -52,6 +52,12 @@ public static class CellHelper
     /// 셀의 텍스트 값을 반환한다 (SharedString·인라인 문자열·숫자 모두 처리).
     /// 셀이 없으면 null 반환.
     /// </summary>
+    /// <summary>
+    /// 셀에 수식이 있는지. 수식 셀은 값을 덮어쓰지 않는다 (예: 2·3번째 시트 날짜가 첫 시트를 참조하는 경우).
+    /// </summary>
+    public static bool HasFormula(WorksheetPart wsPart, string cellAddress)
+        => FindCell(wsPart.Worksheet, cellAddress)?.CellFormula != null;
+
     public static string? GetCellValue(WorksheetPart wsPart, string cellAddress)
     {
         var cell = FindCell(wsPart.Worksheet, cellAddress);

@@ -2,7 +2,6 @@ using System.ComponentModel;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
-using System.Windows.Controls;
 using System.Windows.Threading;
 using FormFiller.App.ViewModels.Settings;
 using FormFiller.Core.Config;
@@ -11,78 +10,73 @@ namespace FormFiller.App.Views;
 
 /// <summary>
 /// DocumentSetupWindow 코드-비하인드.
-/// Excel COM 을 dynamic + Type.GetTypeFromProgID 로 직접 사용한다.
-/// NuGet Interop 패키지 불필요 → office.dll 의존성 없음.
-/// 셀 감지는 200ms DispatcherTimer 폴링으로 처리한다.
+/// - Excel COM 을 dynamic + Type.GetTypeFromProgID 로 직접 사용한다 (Interop 패키지 불필요).
+/// - IExcelBridge 를 구현해 ViewModel 이 "지금 선택된 칸/그림", "그림 위치" 등을 물어볼 수 있게 한다.
+/// - 200ms 타이머로 Excel 선택이 바뀌었는지 살핀다 (Excel 이벤트를 COM 으로 받는 것보다 단순하고 안정적).
 /// </summary>
-public partial class DocumentSetupWindow : Window
+public partial class DocumentSetupWindow : Window, IExcelBridge
 {
-    private dynamic?        _xl;
-    private dynamic?        _wb;
-    private ExcelHwndHost?  _excelHost;
+    private dynamic?         _xl;
+    private dynamic?         _wb;
+    private ExcelHwndHost?   _excelHost;
     private DispatcherTimer? _pollTimer;
-    private string          _lastPolledAddr = "";
+    private string?          _pickBaseline;   // 고르기 시작할 때의 선택 (이후 "바뀐" 선택만 지정)
 
-    public DocumentSetupWindow()
+    private DocumentSetupViewModel Vm => (DocumentSetupViewModel)DataContext;
+
+    /// <summary>새 문서 추가</summary>
+    public DocumentSetupWindow() : this(null) { }
+
+    /// <summary>existing 이 있으면 그 문서를 편집한다.</summary>
+    public DocumentSetupWindow(DocumentConfig? existing)
     {
         InitializeComponent();
 
-        var vm = (DocumentSetupViewModel)DataContext;
-        vm.PropertyChanged += OnVmChanged;
-        vm.SaveSucceeded   += (_, _) => DialogResult = true;
+        Vm.Bridge = this;
+        Vm.PropertyChanged += OnVmChanged;
+        Vm.SaveSucceeded   += (_, _) => DialogResult = true;
+        Vm.PickStarted     += (_, _) => _pickBaseline = SafeSelection()?.Signature;
+
         // 창이 없어지기 "전에" Excel 창의 소유자 지정을 풀어 둔다 (ExcelHwndHost.Detach 설명 참고)
         Closing += (_, _) => _excelHost?.Detach();
         Closed  += (_, _) => CleanupExcel();
 
-        // 창이 뜨고 한가해지면 Excel 을 미리 켜 둔다 (Excel 시작에 1~2초 걸리므로 파일 선택 전에 끝내 둔다)
-        Loaded += (_, _) => Dispatcher.BeginInvoke(
-            () => { try { EnsureExcel(); } catch { /* 실패해도 파일 열 때 다시 시도 */ } },
-            DispatcherPriority.ApplicationIdle);
+        Loaded += (_, _) =>
+        {
+            if (existing != null) Vm.LoadExisting(existing);
+            // 한가해지면 Excel 을 미리 켜 둔다 (Excel 시작에 1~2초 걸림)
+            Dispatcher.BeginInvoke(() => { try { if (Vm.IsExcel) EnsureExcel(); } catch { } },
+                                   DispatcherPriority.ApplicationIdle);
+        };
     }
 
     private void OnVmChanged(object? sender, PropertyChangedEventArgs e)
     {
-        var vm = (DocumentSetupViewModel)DataContext;
         switch (e.PropertyName)
         {
             case nameof(DocumentSetupViewModel.FilePath):
-                if (!string.IsNullOrEmpty(vm.FilePath) && File.Exists(vm.FilePath))
-                    OpenExcel(vm.FilePath, vm.SelectedSheet ?? "");
-                else
-                    CloseWorkbook();
+                if (Vm.IsExcel && File.Exists(Vm.FilePath)) OpenExcel(Vm.FilePath, Vm.SelectedSheet);
+                else CloseWorkbook();
                 break;
 
             case nameof(DocumentSetupViewModel.SelectedSheet):
-                SwitchSheet(vm.SelectedSheet ?? "");
+                SwitchSheet(Vm.SelectedSheet);
                 break;
 
-            case nameof(DocumentSetupViewModel.IsPickerActive):
-                UpdatePickerBorder();
-                _lastPolledAddr = "";   // 피커 모드 전환 시 마지막 셀 초기화
+            case nameof(DocumentSetupViewModel.IsPicking):
+                PreviewBorder.BorderBrush     = Vm.IsPicking ? System.Windows.Media.Brushes.DodgerBlue
+                                                             : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xCB, 0xD5, 0xE0));
+                PreviewBorder.BorderThickness = new Thickness(Vm.IsPicking ? 3 : 1);
                 break;
         }
     }
 
-    private void UpdatePickerBorder()
-    {
-        var vm = (DocumentSetupViewModel)DataContext;
-        PreviewBorder.BorderBrush     = vm.IsPickerActive
-            ? System.Windows.Media.Brushes.DodgerBlue
-            : System.Windows.Media.Brushes.LightGray;
-        PreviewBorder.BorderThickness = vm.IsPickerActive
-            ? new Thickness(2) : new Thickness(1);
-    }
+    // ── Excel 열기 / 닫기 ────────────────────────────────────────────
 
-    // ── Excel 열기 ─────────────────────────────────────────────────
-
-    /// <summary>
-    /// Excel 인스턴스가 없으면 만든다. 이미 있으면 그대로 재사용한다.
-    /// (파일을 바꿀 때마다 Excel 을 새로 켜면 매번 1~2초씩 더 걸린다)
-    /// </summary>
+    /// <summary>Excel 인스턴스가 없으면 만든다 (파일을 바꿔도 재사용 → 빠름).</summary>
     private void EnsureExcel()
     {
         if (_xl != null) return;
-
         var excelType = Type.GetTypeFromProgID("Excel.Application")
             ?? throw new InvalidOperationException("Excel이 설치되어 있지 않거나 등록되지 않았습니다.");
 
@@ -96,44 +90,35 @@ public partial class DocumentSetupWindow : Window
     private void OpenExcel(string filePath, string sheetName)
     {
         CloseWorkbook();
-
         try
         {
             EnsureExcel();
 
-            // ReadOnly: 원본 서식 파일을 실수로 덮어쓰지 않기 위해 읽기 전용으로 연다.
-            //           읽기 전용이어도 셀 선택·스크롤은 되므로 필드 지정에는 문제없다.
-            _wb = _xl!.Workbooks.Open(filePath,
-                UpdateLinks: false,
-                ReadOnly: true,
-                IgnoreReadOnlyRecommended: true);
-
+            // ReadOnly: 원본 서식을 실수로 덮어쓰지 않도록. 칸 선택·그림 옮기기(미리보기)는 그대로 된다.
+            _wb = _xl!.Workbooks.Open(filePath, UpdateLinks: false, ReadOnly: true, IgnoreReadOnlyRecommended: true);
             SwitchSheet(sheetName);
 
             _xl.Visible     = true;
             _xl.WindowState = -4143; // xlNormal
 
-            // 창 초기화 대기 후 임베드
             var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
             timer.Tick += (_, _) => { timer.Stop(); EmbedExcelWindow(); StartPolling(); };
             timer.Start();
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"엑셀을 열 수 없습니다:\n{ex.Message}",
-                "오류", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show($"엑셀을 열 수 없습니다:\n{ex.Message}", "오류", MessageBoxButton.OK, MessageBoxImage.Error);
             CloseWorkbook();
         }
     }
 
     private void EmbedExcelWindow()
     {
-        if (_xl == null) return;
+        if (_xl == null || _wb == null) return;
         try
         {
-            IntPtr hwnd = new IntPtr((int)_xl.Hwnd);
+            IntPtr hwnd = new((int)_xl.Hwnd);
             if (hwnd == IntPtr.Zero) return;
-
             _excelHost = new ExcelHwndHost();
             ExcelHostControl.Content = _excelHost;
             _excelHost.AttachExcel(hwnd);
@@ -141,29 +126,21 @@ public partial class DocumentSetupWindow : Window
         catch { }
     }
 
-    /// <summary>
-    /// 열려 있는 통합문서를 닫고 임베드를 해제한다. Excel 프로세스는 다음 파일을 위해 켜 둔다.
-    /// (Excel 2013 이후는 통합문서마다 창이 따로 있어서, 파일이 바뀌면 임베드할 창도 바뀐다)
-    /// </summary>
+    /// <summary>통합문서를 닫는다. Excel 프로세스는 다음 파일을 위해 켜 둔다.</summary>
     private void CloseWorkbook()
     {
         _pollTimer?.Stop();
         _pollTimer = null;
-        _lastPolledAddr = "";
+        Vm.CancelPick();
 
-        // [순서] ① 떼기(소유자 해제) → ② 숨기기 → ③ 닫기.
+        // [순서] ① 떼기(소유자 해제) → ② 숨기기 → ③ 닫기(저장 안 함)
         _excelHost?.Detach();
         ExcelHostControl.Content = null;
         _excelHost = null;
 
-        // 떼어낸 창이 바탕화면에 보이지 않도록 바로 숨긴다 (다음 파일도 임베드 전까지 숨김 상태로 열림)
-        try { if (_xl != null) _xl.Visible = false; }
-        catch { }
-
-        try { _wb?.Close(false); }
-        catch { }
-        try { if (_wb != null) Marshal.ReleaseComObject(_wb); }
-        catch { }
+        try { if (_xl != null) _xl.Visible = false; } catch { }
+        try { _wb?.Close(false); } catch { }
+        try { if (_wb != null) Marshal.ReleaseComObject(_wb); } catch { }
         _wb = null;
     }
 
@@ -172,96 +149,182 @@ public partial class DocumentSetupWindow : Window
         if (_wb == null || string.IsNullOrEmpty(sheetName)) return;
         try
         {
+            if ((string)_xl!.ActiveSheet.Name == sheetName) return;
             foreach (dynamic ws in _wb.Sheets)
                 if ((string)ws.Name == sheetName) { ws.Activate(); return; }
         }
         catch { }
     }
 
-    // ── 셀 폴링 (피커 모드 활성 시 현재 선택 셀 감지) ──────────────
+    private void CleanupExcel()
+    {
+        CloseWorkbook();
+        try { _xl?.Quit(); } catch { }
+        try { if (_xl != null) { Marshal.ReleaseComObject(_xl); _xl = null; } } catch { }
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+    }
+
+    // ── 선택 살피기 (200ms) ──────────────────────────────────────────
 
     private void StartPolling()
     {
         _pollTimer?.Stop();
         _pollTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
-        _pollTimer.Tick += (_, _) => PollActiveCell();
+        _pollTimer.Tick += (_, _) => Poll();
         _pollTimer.Start();
     }
 
-    private void PollActiveCell()
+    private void Poll()
     {
-        var vm = (DocumentSetupViewModel)DataContext;
-        if (!vm.IsPickerActive || _xl == null) return;
+        if (_wb == null) return;
 
+        // Excel 아래쪽 시트 탭으로 시트를 바꾸면 화면 상태도 맞춘다
         try
         {
-            dynamic? cell = _xl.ActiveCell;
-            if (cell == null) return;
+            string active = (string)_xl!.ActiveSheet.Name;
+            if (active != Vm.SelectedSheet) Vm.SelectedSheet = active;
+        }
+        catch { return; }   // Excel 이 바쁨(셀 편집 중 등) → 다음에
 
-            int row = (int)cell.Row;
-            int col = (int)cell.Column;
-            string addr = ColLetter(col) + row;
+        if (!Vm.IsPicking) return;
 
-            if (addr == _lastPolledAddr) return; // 같은 셀이면 무시
-            _lastPolledAddr = addr;
+        var sel = SafeSelection();
+        if (sel == null || sel.Signature == _pickBaseline) return;
+        _pickBaseline = sel.Signature;
+        Vm.OnExcelSelectionChanged(sel);
+    }
 
-            string value = cell.Value2 is null ? "" : cell.Value2.ToString();
-            vm.OnCellClicked(addr, value);
+    private ExcelSelection? SafeSelection()
+    {
+        try { return GetSelection(); } catch { return null; }
+    }
+
+    // ── IExcelBridge 구현 ────────────────────────────────────────────
+
+    public ExcelSelection? GetSelection()
+    {
+        if (_wb == null || _xl == null) return null;
+        dynamic sel = _xl.Selection;
+        if (sel == null) return null;
+
+        // 그림·글상자가 선택되어 있으면 ShapeRange 가 있다 (칸 선택이면 없어서 예외)
+        try
+        {
+            dynamic sr = sel.ShapeRange;
+            int n = (int)sr.Count;
+            var names = new List<string>();
+            var order = new List<int>();
+            for (int i = 1; i <= n; i++)
+            {
+                names.Add((string)sr.Item(i).Name);
+                order.Add((int)sr.Item(i).ZOrderPosition - 1);   // 시트 안 그림 순서 (파일의 그림 순서와 같다)
+            }
+            dynamic tl = sr.Item(1).TopLeftCell;
+            return new ExcelSelection(true, (string)tl.Address(false, false), (int)tl.Row, (int)tl.Column, 1, names, order);
+        }
+        catch { /* 칸 선택 */ }
+
+        return new ExcelSelection(false, (string)_xl.ActiveCell.Address(false, false),
+                                  (int)sel.Row, (int)sel.Column, (int)sel.Rows.Count, [], []);
+    }
+
+    /// <summary>시트 안 순서(0부터)로 그림·글상자를 찾는다.</summary>
+    private static dynamic? ShapeAt(dynamic ws, int index)
+    {
+        foreach (dynamic sh in ws.Shapes)
+            if ((int)sh.ZOrderPosition == index + 1) return sh;
+        return null;
+    }
+
+    /// <summary>1pt = 12,700 EMU (엑셀 내부 위치 단위)</summary>
+    private const double EmuPerPoint = 12700.0;
+
+    public List<ShapePlacement> ReadPlacements(IEnumerable<int> shapeIndexes)
+    {
+        var list = new List<ShapePlacement>();
+        if (_wb == null) return list;
+        dynamic ws = _xl!.ActiveSheet;
+
+        foreach (int index in shapeIndexes)
+        {
+            try
+            {
+                dynamic? sh = ShapeAt(ws, index);
+                if (sh == null) continue;
+                string name = sh.Name;
+                double left = sh.Left, top = sh.Top, right = left + (double)sh.Width, bottom = top + (double)sh.Height;
+                dynamic tl = sh.TopLeftCell, br = sh.BottomRightCell;
+                list.Add(new ShapePlacement
+                {
+                    Name       = name,
+                    Index      = index,
+                    FromCol    = (int)tl.Column - 1, FromColOff = (long)((left - (double)tl.Left) * EmuPerPoint),
+                    FromRow    = (int)tl.Row - 1,    FromRowOff = (long)((top  - (double)tl.Top)  * EmuPerPoint),
+                    ToCol      = (int)br.Column - 1, ToColOff   = (long)((right  - (double)br.Left) * EmuPerPoint),
+                    ToRow      = (int)br.Row - 1,    ToRowOff   = (long)((bottom - (double)br.Top)  * EmuPerPoint),
+                });
+            }
+            catch { /* 이 시트에 그 이름의 그림이 없음 */ }
+        }
+        return list;
+    }
+
+    public void ApplyPlacements(IEnumerable<ShapePlacement> placements)
+    {
+        if (_wb == null) return;
+        try
+        {
+            dynamic ws = _xl!.ActiveSheet;
+            foreach (var p in placements)
+            {
+                try
+                {
+                    dynamic? sh = p.Index >= 0 ? ShapeAt(ws, p.Index) : ws.Shapes.Item(p.Name);
+                    if (sh == null) continue;
+                    dynamic c  = ws.Cells(p.FromRow + 1, p.FromCol + 1);
+                    sh.Left = (double)c.Left + p.FromColOff / EmuPerPoint;
+                    sh.Top  = (double)c.Top  + p.FromRowOff / EmuPerPoint;
+                }
+                catch { }
+            }
         }
         catch { }
     }
 
-    // ── Excel 정리 ────────────────────────────────────────────────
-
-    /// <summary>창을 닫을 때 호출: 통합문서를 닫고 Excel 프로세스까지 종료한다.</summary>
-    private void CleanupExcel()
+    public void Reveal(string? cell, IEnumerable<int>? shapeIndexes)
     {
-        CloseWorkbook();
+        if (_wb == null) return;
+        try
+        {
+            dynamic ws = _xl!.ActiveSheet;
+            var names = new List<object>();
+            foreach (int i in shapeIndexes ?? [])
+                if (ShapeAt(ws, i) is { } sh) names.Add((string)sh.Name);
 
-        try { _xl?.Quit(); }
+            if (names.Count > 0) ws.Shapes.Range(names.ToArray()).Select();
+            else if (!string.IsNullOrEmpty(cell)) ws.Range(cell).Select();
+        }
         catch { }
-        try { if (_xl != null) { Marshal.ReleaseComObject(_xl); _xl = null; } }
-        catch { }
-
-        GC.Collect();
-        GC.WaitForPendingFinalizers();
-        _lastPolledAddr = "";
     }
 
-    // ── 테이블 설정 버튼 ──────────────────────────────────────────
-
-    private void TableSetup_Click(object sender, RoutedEventArgs e)
+    /// <summary>시험·자동화용: 이름으로 그림을 선택한다 (사용자 클릭과 같은 효과).</summary>
+    public void SelectShapesByName(params string[] names)
     {
-        if (sender is not Button btn || btn.Tag is not FieldAssignRow field) return;
-        bool isEquip = field.Type == FieldTypes.EquipmentTable;
-        string msg = isEquip
-            ? $"장비 테이블\n시작행:{field.StartRow} / 끝행:{field.EndRow}\n장비명:{field.NameCol} / 전일:{field.PrevDayCol} / 금일:{field.TodayCol}"
-            : $"인원 테이블\n시작행:{field.StartRow} / 끝행:{field.EndRow}\n직종:{field.RoleCol} / 전일누계:{field.PrevCumulativeCol} / 금일:{field.TodayCol}";
-        MessageBox.Show(msg + "\n\n※ 오른쪽 패널에서 직접 수정하세요.",
-            "테이블 설정", MessageBoxButton.OK, MessageBoxImage.Information);
+        try { _xl!.ActiveSheet.Shapes.Range(names.Cast<object>().ToArray()).Select(); } catch { }
     }
 
     // ── 드래그 앤 드롭 ────────────────────────────────────────────
 
     private void Window_DragOver(object sender, DragEventArgs e)
     {
-        e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop)
-            ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None;
         e.Handled = true;
     }
 
     private void Window_Drop(object sender, DragEventArgs e)
     {
         if (e.Data.GetData(DataFormats.FileDrop) is string[] files)
-            ((DocumentSetupViewModel)DataContext).HandleDroppedFile(files);
-    }
-
-    // ── 유틸리티 ─────────────────────────────────────────────────
-
-    private static string ColLetter(int col)
-    {
-        string s = "";
-        while (col > 0) { s = (char)('A' + (col - 1) % 26) + s; col = (col - 1) / 26; }
-        return s;
+            Vm.HandleDroppedFile(files);
     }
 }

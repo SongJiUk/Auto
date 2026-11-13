@@ -691,6 +691,138 @@
                     </ItemsControl>
                 </GroupBox>
 
+                <!-- ══════════════ 문서별 입력 (사진·측정값·위치, 시트마다) ══════════════ -->
+                <ItemsControl ItemsSource="{Binding DocInputCards}"
+                              Visibility="{Binding HasDocInputs, Converter={StaticResource BoolVis}}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="{x:Type vm:DocInputCardViewModel}">
+                            <GroupBox>
+                                <GroupBox.Header>
+                                    <TextBlock Text="{Binding Name, StringFormat='📋 {0}'}" FontWeight="SemiBold"/>
+                                </GroupBox.Header>
+                                <StackPanel>
+                                    <!-- 사진 폴더 불러오기 -->
+                                    <DockPanel Margin="0,0,0,8"
+                                               Visibility="{Binding HasPhotos, Converter={StaticResource BoolVis}}">
+                                        <Button DockPanel.Dock="Left" Content="📂 폴더에서 오늘 사진 불러오기"
+                                                Command="{Binding ImportPhotosCommand}"
+                                                Padding="10,4" Background="#2B6CB0" Foreground="White"
+                                                BorderThickness="0" Cursor="Hand"/>
+                                        <Button DockPanel.Dock="Left" Content="폴더 바꾸기" Margin="6,0,0,0"
+                                                Command="{Binding ChangeFolderCommand}"
+                                                Padding="8,4" Background="#EDF2F7" BorderBrush="#CBD5E0" Cursor="Hand"/>
+                                        <TextBlock Text="{Binding PhotoFolderText}" Foreground="#A0AEC0" FontSize="11"
+                                                   VerticalAlignment="Center" Margin="10,0,0,0"
+                                                   TextTrimming="CharacterEllipsis"/>
+                                    </DockPanel>
+
+                                    <!-- 시트별 탭 -->
+                                    <TabControl ItemsSource="{Binding Sheets}" SelectedItem="{Binding SelectedSheet}"
+                                                BorderBrush="#CBD5E0">
+                                        <TabControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding Header}" Padding="6,2"/>
+                                            </DataTemplate>
+                                        </TabControl.ItemTemplate>
+                                        <TabControl.ContentTemplate>
+                                            <DataTemplate>
+                                                <ItemsControl ItemsSource="{Binding Items}" Margin="4,8,4,4">
+                                                    <ItemsControl.ItemsPanel>
+                                                        <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
+                                                    </ItemsControl.ItemsPanel>
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate DataType="{x:Type vm:FieldInputViewModel}">
+                                                            <Border Width="190" Margin="0,0,10,10" Padding="8"
+                                                                    BorderBrush="#E2E8F0" BorderThickness="1"
+                                                                    CornerRadius="6" Background="White">
+                                                                <StackPanel>
+                                                                    <!-- 제목 + 시각 -->
+                                                                    <DockPanel Margin="0,0,0,6">
+                                                                        <TextBlock DockPanel.Dock="Right" Text="{Binding TimeText}"
+                                                                                   Foreground="#718096" FontSize="11"/>
+                                                                        <TextBlock Text="{Binding Label}" FontWeight="SemiBold"
+                                                                                   Foreground="#2D3748" TextTrimming="CharacterEllipsis"/>
+                                                                    </DockPanel>
+
+                                                                    <!-- 사진 (클릭 또는 끌어다 놓기) -->
+                                                                    <Grid Visibility="{Binding IsPhoto, Converter={StaticResource BoolVis}}"
+                                                                          Margin="0,0,0,6">
+                                                                        <Button Command="{Binding BrowseCommand}" Cursor="Hand"
+                                                                                AllowDrop="True" Drop="DocPhoto_Drop"
+                                                                                DragOver="PhotoSlot_DragOver">
+                                                                            <Button.Template>
+                                                                                <ControlTemplate TargetType="Button">
+                                                                                    <Border Height="120" Background="#F7FAFC" CornerRadius="4"
+                                                                                            BorderBrush="#CBD5E0" BorderThickness="1">
+                                                                                        <ContentPresenter/>
+                                                                                    </Border>
+                                                                                </ControlTemplate>
+                                                                            </Button.Template>
+                                                                            <Grid>
+                                                                                <TextBlock Text="🖼  클릭 또는 끌어다 놓기"
+                                                                                           Foreground="#A0AEC0" FontSize="11"
+                                                                                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                                                <Image Source="{Binding Thumbnail}" Stretch="UniformToFill"/>
+                                                                            </Grid>
+                                                                        </Button>
+                                                                        <Button Content="✕" Command="{Binding ClearCommand}"
+                                                                                HorizontalAlignment="Right" VerticalAlignment="Top"
+                                                                                Margin="0,4,4,0" Width="20" Height="20" FontSize="10"
+                                                                                Background="#FED7D7" Foreground="#C53030" BorderThickness="0"
+                                                                                Visibility="{Binding HasPhoto, Converter={StaticResource BoolVis}}"/>
+                                                                        <TextBlock Text="{Binding PhotoInfo}" FontSize="10" Foreground="White"
+                                                                                   Background="#80000000" Padding="4,1"
+                                                                                   HorizontalAlignment="Left" VerticalAlignment="Bottom"
+                                                                                   Margin="4,0,0,4"
+                                                                                   Visibility="{Binding HasPhoto, Converter={StaticResource BoolVis}}"/>
+                                                                    </Grid>
+
+                                                                    <!-- 값 입력 (+ 단위, 사진에서 읽기) -->
+                                                                    <DockPanel Visibility="{Binding HasValue, Converter={StaticResource BoolVis}}">
+                                                                        <TextBlock DockPanel.Dock="Right" Text="{Binding Suffix}"
+                                                                                   Foreground="#718096" VerticalAlignment="Center" Margin="4,0,0,0"/>
+                                                                        <TextBox Text="{Binding Value, UpdateSourceTrigger=PropertyChanged}"
+                                                                                 Padding="4,3" FontSize="13"/>
+                                                                    </DockPanel>
+                                                                    <Button Content="{Binding ReadButtonText}" Command="{Binding ReadValueCommand}"
+                                                                            Margin="0,4,0,0" Padding="4,2" FontSize="11"
+                                                                            Background="#EDF2F7" BorderBrush="#CBD5E0" Cursor="Hand"
+                                                                            ToolTip="사진 속 측정기 숫자를 AI로 읽어 칸에 채웁니다 (사진 1장 전송). 확인 후 생성하세요.">
+                                                                        <Button.Style>
+                                                                            <Style TargetType="Button">
+                                                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                                                <Style.Triggers>
+                                                                                    <MultiDataTrigger>
+                                                                                        <MultiDataTrigger.Conditions>
+                                                                                            <Condition Binding="{Binding HasPhoto}" Value="True"/>
+                                                                                            <Condition Binding="{Binding HasValue}" Value="True"/>
+                                                                                        </MultiDataTrigger.Conditions>
+                                                                                        <Setter Property="Visibility" Value="Visible"/>
+                                                                                    </MultiDataTrigger>
+                                                                                </Style.Triggers>
+                                                                            </Style>
+                                                                        </Button.Style>
+                                                                    </Button>
+
+                                                                    <!-- 위치 선택 -->
+                                                                    <ComboBox ItemsSource="{Binding PresetNames}"
+                                                                              SelectedItem="{Binding SelectedPreset}"
+                                                                              Visibility="{Binding IsShape, Converter={StaticResource BoolVis}}"
+                                                                              ToolTip="설정에서 저장해 둔 위치 중 고릅니다. 고르지 않으면 서식 위치 그대로."/>
+                                                                </StackPanel>
+                                                            </Border>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                            </DataTemplate>
+                                        </TabControl.ContentTemplate>
+                                    </TabControl>
+                                </StackPanel>
+                            </GroupBox>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
                 <!-- ══════════════ 사진대지 ══════════════ -->
                 <GroupBox Header="📷 사진대지 사진"
                           Visibility="{Binding HasPhotoSlots,
