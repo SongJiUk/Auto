@@ -30,7 +30,14 @@ public partial class DocumentSetupWindow : Window
         var vm = (DocumentSetupViewModel)DataContext;
         vm.PropertyChanged += OnVmChanged;
         vm.SaveSucceeded   += (_, _) => DialogResult = true;
-        Closed += (_, _) => CleanupExcel();
+        // 창이 없어지기 "전에" Excel 창의 소유자 지정을 풀어 둔다 (ExcelHwndHost.Detach 설명 참고)
+        Closing += (_, _) => _excelHost?.Detach();
+        Closed  += (_, _) => CleanupExcel();
+
+        // 창이 뜨고 한가해지면 Excel 을 미리 켜 둔다 (Excel 시작에 1~2초 걸리므로 파일 선택 전에 끝내 둔다)
+        Loaded += (_, _) => Dispatcher.BeginInvoke(
+            () => { try { EnsureExcel(); } catch { /* 실패해도 파일 열 때 다시 시도 */ } },
+            DispatcherPriority.ApplicationIdle);
     }
 
     private void OnVmChanged(object? sender, PropertyChangedEventArgs e)
@@ -42,7 +49,7 @@ public partial class DocumentSetupWindow : Window
                 if (!string.IsNullOrEmpty(vm.FilePath) && File.Exists(vm.FilePath))
                     OpenExcel(vm.FilePath, vm.SelectedSheet ?? "");
                 else
-                    CleanupExcel();
+                    CloseWorkbook();
                 break;
 
             case nameof(DocumentSetupViewModel.SelectedSheet):
@@ -68,27 +75,35 @@ public partial class DocumentSetupWindow : Window
 
     // ── Excel 열기 ─────────────────────────────────────────────────
 
+    /// <summary>
+    /// Excel 인스턴스가 없으면 만든다. 이미 있으면 그대로 재사용한다.
+    /// (파일을 바꿀 때마다 Excel 을 새로 켜면 매번 1~2초씩 더 걸린다)
+    /// </summary>
+    private void EnsureExcel()
+    {
+        if (_xl != null) return;
+
+        var excelType = Type.GetTypeFromProgID("Excel.Application")
+            ?? throw new InvalidOperationException("Excel이 설치되어 있지 않거나 등록되지 않았습니다.");
+
+        _xl = Activator.CreateInstance(excelType)!;
+        _xl.Visible           = false;
+        _xl.DisplayAlerts     = false;
+        _xl.DisplayFormulaBar = false;
+        _xl.DisplayStatusBar  = false;
+    }
+
     private void OpenExcel(string filePath, string sheetName)
     {
-        CleanupExcel();
-
-        var excelType = Type.GetTypeFromProgID("Excel.Application");
-        if (excelType == null)
-        {
-            MessageBox.Show("Excel이 설치되어 있지 않거나 등록되지 않았습니다.",
-                "오류", MessageBoxButton.OK, MessageBoxImage.Error);
-            return;
-        }
+        CloseWorkbook();
 
         try
         {
-            _xl = Activator.CreateInstance(excelType)!;
-            _xl.Visible           = false;
-            _xl.DisplayAlerts     = false;
-            _xl.DisplayFormulaBar = false;
-            _xl.DisplayStatusBar  = false;
+            EnsureExcel();
 
-            _wb = _xl.Workbooks.Open(filePath,
+            // ReadOnly: 원본 서식 파일을 실수로 덮어쓰지 않기 위해 읽기 전용으로 연다.
+            //           읽기 전용이어도 셀 선택·스크롤은 되므로 필드 지정에는 문제없다.
+            _wb = _xl!.Workbooks.Open(filePath,
                 UpdateLinks: false,
                 ReadOnly: true,
                 IgnoreReadOnlyRecommended: true);
@@ -107,7 +122,7 @@ public partial class DocumentSetupWindow : Window
         {
             MessageBox.Show($"엑셀을 열 수 없습니다:\n{ex.Message}",
                 "오류", MessageBoxButton.OK, MessageBoxImage.Error);
-            CleanupExcel();
+            CloseWorkbook();
         }
     }
 
@@ -126,6 +141,32 @@ public partial class DocumentSetupWindow : Window
         catch { }
     }
 
+    /// <summary>
+    /// 열려 있는 통합문서를 닫고 임베드를 해제한다. Excel 프로세스는 다음 파일을 위해 켜 둔다.
+    /// (Excel 2013 이후는 통합문서마다 창이 따로 있어서, 파일이 바뀌면 임베드할 창도 바뀐다)
+    /// </summary>
+    private void CloseWorkbook()
+    {
+        _pollTimer?.Stop();
+        _pollTimer = null;
+        _lastPolledAddr = "";
+
+        // [순서] ① 떼기(소유자 해제) → ② 숨기기 → ③ 닫기.
+        _excelHost?.Detach();
+        ExcelHostControl.Content = null;
+        _excelHost = null;
+
+        // 떼어낸 창이 바탕화면에 보이지 않도록 바로 숨긴다 (다음 파일도 임베드 전까지 숨김 상태로 열림)
+        try { if (_xl != null) _xl.Visible = false; }
+        catch { }
+
+        try { _wb?.Close(false); }
+        catch { }
+        try { if (_wb != null) Marshal.ReleaseComObject(_wb); }
+        catch { }
+        _wb = null;
+    }
+
     private void SwitchSheet(string sheetName)
     {
         if (_wb == null || string.IsNullOrEmpty(sheetName)) return;
@@ -141,6 +182,7 @@ public partial class DocumentSetupWindow : Window
 
     private void StartPolling()
     {
+        _pollTimer?.Stop();
         _pollTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
         _pollTimer.Tick += (_, _) => PollActiveCell();
         _pollTimer.Start();
@@ -171,18 +213,10 @@ public partial class DocumentSetupWindow : Window
 
     // ── Excel 정리 ────────────────────────────────────────────────
 
+    /// <summary>창을 닫을 때 호출: 통합문서를 닫고 Excel 프로세스까지 종료한다.</summary>
     private void CleanupExcel()
     {
-        _pollTimer?.Stop();
-        _pollTimer = null;
-
-        ExcelHostControl.Content = null;
-        _excelHost = null;
-
-        try { _wb?.Close(false); }
-        catch { }
-        try { if (_wb != null) { Marshal.ReleaseComObject(_wb); _wb = null; } }
-        catch { }
+        CloseWorkbook();
 
         try { _xl?.Quit(); }
         catch { }

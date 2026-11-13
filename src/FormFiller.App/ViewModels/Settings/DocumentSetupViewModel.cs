@@ -41,16 +41,12 @@ public class DocumentSetupViewModel : ViewModelBase
 
     /// <summary>
     /// 선택된 시트.
-    /// 바뀌면 엑셀 미리보기 데이터를 갱신한다.
+    /// 바뀌면 View(code-behind) 가 임베드된 Excel 의 시트를 전환한다.
     /// </summary>
     public string SelectedSheet
     {
         get => _selectedSheet;
-        set
-        {
-            if (SetField(ref _selectedSheet, value))
-                ReloadPreviewData();
-        }
+        set => SetField(ref _selectedSheet, value);
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -154,27 +150,6 @@ public class DocumentSetupViewModel : ViewModelBase
 
     /// <summary>선택된 사진 시트에서 감지된 슬롯 목록. 각 슬롯에 이름을 붙일 수 있다.</summary>
     public ObservableCollection<PhotoSlotLabelRow> PhotoSlotRows { get; } = [];
-
-    // ════════════════════════════════════════════════════════════════
-    // ── 엑셀 미리보기 데이터 ──────────────────────────────────────
-    // ════════════════════════════════════════════════════════════════
-
-    private ExcelPreviewData? _previewFull;
-
-    /// <summary>
-    /// 엑셀 미리보기 전체 데이터 (셀 값·배경색·정렬·볼드·테두리·열 너비·행 높이·병합 셀).
-    /// View(code-behind) 가 이 객체 하나로 Grid 를 완성한다.
-    /// null 이면 미리보기 없음.
-    /// </summary>
-    public ExcelPreviewData? PreviewFull
-    {
-        get => _previewFull;
-        private set
-        {
-            _previewFull = value;
-            OnPropertyChanged();
-        }
-    }
 
     // ════════════════════════════════════════════════════════════════
     // ── 선택된 셀 정보 ────────────────────────────────────────────
@@ -436,58 +411,6 @@ public class DocumentSetupViewModel : ViewModelBase
             }
         }
         catch { /* 파일 접근 실패 시 무시 */ }
-    }
-
-    /// <summary>
-    /// 시트가 바뀌었을 때 엑셀 미리보기 데이터를 다시 읽는다.
-    /// GetPreviewData 로 모든 스타일 정보를 한 번에 가져온다.
-    /// 실패 시 셀 값만 읽는 간단한 방식으로 폴백한다.
-    /// </summary>
-    private void ReloadPreviewData()
-    {
-        if (string.IsNullOrWhiteSpace(_filePath) || string.IsNullOrWhiteSpace(_selectedSheet))
-        {
-            PreviewFull = null;
-            return;
-        }
-
-        // 1차 시도: 스타일·병합·너비 포함 전체 데이터
-        var full = ExcelAnalyzer.GetPreviewData(_filePath, _selectedSheet);
-        if (full != null)
-        {
-            PreviewFull = full;
-            return;
-        }
-
-        // 2차 폴백: 셀 값만 읽어서 최소한 그리드는 보이게 한다
-        System.Diagnostics.Debug.WriteLine(
-            "[DocumentSetupVM] GetPreviewData 실패 → 셀 값 폴백");
-
-        (int maxRow, int maxCol) = ExcelAnalyzer.GetUsedRange(_filePath, _selectedSheet);
-        if (maxRow > 0 && maxCol > 0)
-        {
-            var values = ExcelAnalyzer.GetCellValues(_filePath, _selectedSheet, maxRow, maxCol);
-            int rows   = values.GetLength(0);
-            int cols   = values.GetLength(1);
-
-            PreviewFull = new ExcelPreviewData
-            {
-                Rows         = rows,
-                Cols         = cols,
-                Values       = values,
-                BgColors     = new uint?[rows, cols],
-                HAlignments  = new ExcelHAlign[rows, cols],
-                IsBold       = new bool[rows, cols],
-                Borders      = new ExcelBorderInfo[rows, cols],
-                ColWidthsPx  = Enumerable.Repeat(80.0, cols).ToArray(),
-                RowHeightsPx = Enumerable.Repeat(22.0, rows).ToArray(),
-                Merges       = [],
-            };
-        }
-        else
-        {
-            PreviewFull = null;
-        }
     }
 
     /// <summary>

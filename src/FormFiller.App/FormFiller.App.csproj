@@ -8,6 +8,10 @@
     <UseWPF>true</UseWPF>
 
     <RootNamespace>FormFiller.App</RootNamespace>
+
+    <!-- 단일 파일 배포 시 WPF 네이티브 DLL(wpfgfx_cor3.dll 등)도 exe 안에 포함한다.
+         이게 없으면 exe 옆에 DLL이 따로 생기고, exe만 복사하면 다른 PC에서 실행이 안 된다. -->
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
   </PropertyGroup>
 
   <ItemGroup>
