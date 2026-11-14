@@ -73,7 +73,7 @@ public class DocumentDueItem : ViewModelBase
 
         NextDueText = IsDue
             ? ""
-            : $"다음: {CalculateNextDue(config, today, outputFolder, baseDir):MM/dd}";
+            : $"다음: {CalculateNextDue(config, today, outputFolder, baseDir):MM'/'dd}";
     }
 
     // ── 주기 계산 ─────────────────────────────────────────────────────

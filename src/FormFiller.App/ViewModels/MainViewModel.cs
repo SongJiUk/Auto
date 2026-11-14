@@ -199,7 +199,7 @@ public class MainViewModel : ViewModelBase
         int docCount = DocumentDueList.Count(d => d.IsChecked);
         var docs = Step("docs");
         docs.IsDone  = docCount > 0;
-        docs.Summary = docCount > 0 ? $"{TargetDate:MM/dd (ddd)} · 문서 {docCount}개" : "만들 문서를 고르세요";
+        docs.Summary = docCount > 0 ? $"{TargetDate:MM'/'dd (ddd)} · 문서 {docCount}개" : "만들 문서를 고르세요";
 
         int am = CountFilled(TodayMorningItems), pm = CountFilled(TodayAfternoonItems), tm = CountFilled(TomorrowWorkItems);
         var work = Step("work");
@@ -573,15 +573,15 @@ public class MainViewModel : ViewModelBase
                 var noValue = sheet.Items.Where(i => i.HasValue && i.Value.Trim().Length == 0).Select(i => i.Label).ToList();
                 string where = card.Sheets.Count > 1 ? $"[{sheet.Header}] " : "";
                 if (noPhoto.Count > 0)
-                    c.Warn($"{where}사진 없음 {noPhoto.Count}칸 ({ShortList(noPhoto)}) → 서식 사진 그대로");
+                    c.Warn($"{where}사진 없음 {noPhoto.Count}칸 ({ShortList(noPhoto)}) → 바탕 파일(앞 날짜) 사진이 그대로 남음");
                 if (noValue.Count > 0)
-                    c.Warn($"{where}값 없음 {noValue.Count}칸 ({ShortList(noValue)}) → 서식 값 그대로");
+                    c.Warn($"{where}값 없음 {noValue.Count}칸 ({ShortList(noValue)}) → 바탕 파일(앞 날짜) 값이 그대로 남음");
             }
         }
 
         int emptySlots = PhotoSlots.Count(s => s.DocumentId == doc.Id && !s.HasPhoto);
         if (emptySlots > 0)
-            c.Warn($"사진대지 빈 칸 {emptySlots}개 → 서식 사진 그대로");
+            c.Warn($"사진대지 빈 칸 {emptySlots}개 → 바탕 파일(앞 날짜) 사진이 그대로 남음");
 
         return c;
     }
@@ -709,7 +709,11 @@ public class MainViewModel : ViewModelBase
             var wsPart = CellHelper.FindWorksheetPart(wbPart, dailyDoc.SheetName);
             if (wsPart == null) { InitDefaultItems(); return; }
 
-            LoadItemsFromCells(TodayMorningItems, wsPart, todayField?.Cells);
+            // 어제의 "명일 작업"이 오늘의 "금일 작업"이 된다. 명일 칸이 비어 있으면 어제 금일을 쓴다.
+            // 명일 작업은 보통 비슷하게 이어지므로 어제 명일을 그대로 두고 고치게 한다.
+            LoadItemsFromCells(TodayMorningItems, wsPart, tomorrowField?.Cells);
+            if (!TodayMorningItems.Any(i => !IsBlankWork(i.Text)))
+                LoadItemsFromCells(TodayMorningItems, wsPart, todayField?.Cells);
             LoadItemsFromCells(TomorrowWorkItems, wsPart, tomorrowField?.Cells);
         }
         catch { InitDefaultItems(); }
@@ -768,13 +772,50 @@ public class MainViewModel : ViewModelBase
         GenericExcelWriter.FindPreviousFile(TargetDate, dailyDoc.OutputPattern,
                                             AppDomain.CurrentDomain.BaseDirectory, config.OutputFolder);
 
-    private static void CopyPersonnel(ObservableCollection<PersonnelEntryViewModel> target, List<PersonnelEntry> source)
+    private static string NormKey(string s) => s.Replace(" ", "").ToLowerInvariant();
+
+    /// <summary>
+    /// 장비·인원 줄을 src(파일에서 읽은 줄 + 전일 값)대로 다시 만든다.
+    /// 화면에 이미 입력한 금일 값은 이름이 같은 줄에 살린다.
+    /// keepPrev: 앞 날짜 파일이 없을 때(첫날) — 사용자가 직접 넣은 전일 값을 지우지 않는다.
+    /// </summary>
+    private void SyncRows(DailyInput src, bool keepPrev)
     {
-        for (int i = 0; i < Math.Min(target.Count, source.Count); i++)
+        bool track = _trackDirty;
+        _trackDirty = false;   // 프로그램이 다시 채우는 것이라 "입력 바꿈"으로 세지 않는다
+        try
         {
-            target[i].PrevCumulativeCount = source[i].PrevCumulativeCount;
-            target[i].LastFileTodayCount  = source[i].LastFileTodayCount;
+            var oldEq = Equipment.GroupBy(e => NormKey(e.Name)).ToDictionary(g => g.Key, g => g.First());
+            Equipment.Clear();
+            foreach (var e in src.Equipment)
+            {
+                oldEq.TryGetValue(NormKey(e.Name), out var old);
+                var vm = AddEquipment(e.Name, e.Spec.Length > 0 ? e.Spec : old?.Spec ?? "");
+                vm.PrevDayCount       = keepPrev ? old?.PrevDayCount ?? 0 : e.PrevDayCount;
+                vm.TodayCount         = old?.TodayCount ?? 0;
+                vm.LastFileTodayCount = e.LastFileTodayCount;
+            }
+
+            var oldPn = Personnel.GroupBy(p => NormKey(p.Role)).ToDictionary(g => g.Key, g => g.First());
+            Personnel.Clear();
+            foreach (var p in src.Personnel)
+            {
+                oldPn.TryGetValue(NormKey(p.Role), out var old);
+                var vm = AddPersonnel(Personnel, p.Role);
+                vm.PrevCumulativeCount = keepPrev ? old?.PrevCumulativeCount ?? 0 : p.PrevCumulativeCount;
+                vm.TodayCount          = old?.TodayCount ?? 0;
+                vm.LastFileTodayCount  = p.LastFileTodayCount;
+            }
+
+            // 수장재팀은 따로 관리하는 줄이라 다시 만들지 않고 값만 옮긴다
+            if (!keepPrev)
+                for (int i = 0; i < Math.Min(SujangjaePersonnel.Count, src.SujangjaePersonnel.Count); i++)
+                {
+                    SujangjaePersonnel[i].PrevCumulativeCount = src.SujangjaePersonnel[i].PrevCumulativeCount;
+                    SujangjaePersonnel[i].LastFileTodayCount  = src.SujangjaePersonnel[i].LastFileTodayCount;
+                }
         }
+        finally { _trackDirty = track; }
     }
 
     private bool _hasLastFileToday;
@@ -806,17 +847,40 @@ public class MainViewModel : ViewModelBase
             PrevSourceText = "이전 공사일보에서 전일 값을 불러오는 중…";
             DateTime date    = TargetDate;
             string   baseDir = AppDomain.CurrentDomain.BaseDirectory;
-            // 화면 목록과 같은 순서의 DailyInput 을 만들어 Core 에서 채운 뒤 다시 화면에 옮긴다
-            var input = BuildDailyInput();
+            var current      = BuildDailyInput();   // 지금 화면 값 (줄 목록을 다시 만들 때 입력한 값을 살리려고)
+            var sujangRoles  = SujangjaePersonnel.Select(p => NormKey(p.Role)).ToHashSet();
 
-            var (prev, error) = await Task.Run(() =>
+            var (prev, input, error) = await Task.Run(() =>
             {
                 var p = GenericExcelWriter.FindPreviousFile(date, dailyDoc.OutputPattern, baseDir, config.OutputFolder);
-                if (p == null) return (p, (Exception?)null);
-                try { GenericExcelWriter.LoadPreviousDay(p.Value.Path, input, dailyDoc); return (p, (Exception?)null); }
-                catch (Exception ex) { return (p, ex); }
+
+                // 장비·인원 줄 목록은 앞 날짜 파일(없으면 서식)에 적힌 그대로 쓴다
+                string rowsFrom = p?.Path ?? Path.Combine(baseDir, dailyDoc.TemplateFile);
+                var built = new DailyInput { SujangjaePersonnel = current.SujangjaePersonnel };
+                try
+                {
+                    var (eqRows, roles) = GenericExcelWriter.ReadTableRows(rowsFrom, dailyDoc);
+                    built.Equipment = eqRows.Count == 0 ? current.Equipment
+                        : eqRows.Select(r => new EquipmentEntry { Name = r.Name, Spec = r.Spec }).ToList();
+                    built.Personnel = roles.Count == 0 ? current.Personnel
+                        : roles.Where(r => !sujangRoles.Contains(NormKey(r)))
+                               .Select(r => new PersonnelEntry { Role = r }).ToList();
+                }
+                catch (Exception ex)
+                {
+                    AppLog.Error($"장비·인원 줄 읽기 실패: {rowsFrom}", ex);
+                    built.Equipment = current.Equipment;
+                    built.Personnel = current.Personnel;
+                }
+
+                if (p == null) return (p, built, (Exception?)null);
+                try { GenericExcelWriter.LoadPreviousDay(p.Value.Path, built, dailyDoc); return (p, built, (Exception?)null); }
+                catch (Exception ex) { return (p, built, ex); }
             });
             if (version != _prevLoadVersion) return;   // 그 사이 날짜가 또 바뀜
+
+            // 줄 목록을 파일 기준으로 다시 만든다. 이미 입력한 금일 값(첫날이면 전일 값도)은 이름으로 찾아 살린다.
+            SyncRows(input, keepPrev: prev == null || error != null);
 
             HasPrevFile = prev != null;
             if (prev == null) HasLastFileToday = false;
@@ -833,18 +897,10 @@ public class MainViewModel : ViewModelBase
                 return;
             }
 
-            // 읽는 사이 줄을 더하거나 지웠을 수 있어 겹치는 줄까지만 옮긴다
-            for (int i = 0; i < Math.Min(Equipment.Count, input.Equipment.Count); i++)
-            {
-                Equipment[i].PrevDayCount       = input.Equipment[i].PrevDayCount;
-                Equipment[i].LastFileTodayCount = input.Equipment[i].LastFileTodayCount;
-            }
-            CopyPersonnel(Personnel, input.Personnel);
-            CopyPersonnel(SujangjaePersonnel, input.SujangjaePersonnel);
             HasLastFileToday = Equipment.Any(e => e.LastFileTodayCount > 0)
                             || Personnel.Concat(SujangjaePersonnel).Any(p => p.LastFileTodayCount > 0);
 
-            PrevSourceText = $"전일 값은 {prev.Value.Date:MM/dd (ddd)} 공사일보의 누계(전일 + 금일)에서 가져왔습니다. " +
+            PrevSourceText = $"전일 값은 {prev.Value.Date:MM'/'dd (ddd)} 공사일보의 누계(전일 + 금일)에서 가져왔습니다. " +
                              "칸을 고치면 고친 값으로 만듭니다.";
         }
         catch (Exception ex)

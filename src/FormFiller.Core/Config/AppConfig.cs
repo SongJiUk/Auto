@@ -113,6 +113,13 @@ public class DocumentConfig
     public string SaveMode { get; set; } = "create";
 
     /// <summary>
+    /// 앞 날짜에 만든 파일이 있으면 그 파일을 바탕으로 만든다 (기본 켜짐).
+    /// 손으로 할 때처럼 "어제 파일 복사 → 바뀐 칸만 고치기" 와 같아서, 지정하지 않은 칸(명단·특기사항·그림 위치 등)은 어제 값이 이어진다.
+    /// 앞 파일이 없으면(첫날) 등록한 서식을 쓴다. 한글(hwpx)은 자리 글자가 필요해서 항상 서식을 쓴다.
+    /// </summary>
+    public bool UsePreviousAsBase { get; set; } = true;
+
+    /// <summary>
     /// 사진을 삽입할 시트 이름 (예: "사진대지").
     /// 비어 있으면 사진 기능을 사용하지 않는다.
     /// </summary>
@@ -173,6 +180,9 @@ public class FieldConfig
 
     /// <summary>장비명 열 — equipment_table 에서 행을 찾는 키</summary>
     public string? NameCol { get; set; }
+
+    /// <summary>규격 열 — equipment_table (새 장비 줄을 빈 행에 쓸 때 규격도 같이 쓴다)</summary>
+    public string? SpecCol { get; set; }
 
     /// <summary>전일(대) 열 — equipment_table</summary>
     public string? PrevDayCol { get; set; }

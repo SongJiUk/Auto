@@ -70,10 +70,13 @@ public static class ExcelDrawingHelper
         var (col, row) = CellHelper.ParseAddress(cellAddress);
         int c = (int)CellHelper.ColLetterToIndex(col) - 1, r = (int)row - 1;
 
-        return Anchors(wsPart).FirstOrDefault(a =>
-            a.Descendants<Xdr.Picture>().Any()
-            && From(a) is { } f
-            && Int(f.ColumnId) == c && Int(f.RowId) == r);
+        var pics = Anchors(wsPart).Where(a => a.Descendants<Xdr.Picture>().Any() && From(a) != null).ToList();
+        return pics.FirstOrDefault(a => Int(From(a)!.ColumnId) == c && Int(From(a)!.RowId) == r)
+            // 손으로 붙인 사진은 한 칸 위·아래에서 시작하기도 한다 (예: 여성회관 5번 사진이 D24 가 아니라 D23).
+            // 같은 열에서 한 줄 차이까지는 같은 칸으로 본다.
+            ?? pics.Where(a => Int(From(a)!.ColumnId) == c && Math.Abs(Int(From(a)!.RowId) - r) <= 1)
+                   .OrderBy(a => Math.Abs(Int(From(a)!.RowId) - r))
+                   .FirstOrDefault();
     }
 
     /// <summary>그림 크기(EMU). twoCellAnchor 도 그림 속성(xfrm)의 크기를 쓴다.</summary>
@@ -113,7 +116,17 @@ public static class ExcelDrawingHelper
         using (var ms = new MemoryStream(bytes))
             newPart.FeedData(ms);
 
+        string? oldId = blip.Embed?.Value;
         blip.Embed = wsPart.DrawingsPart.GetIdOfPart(newPart);
+
+        // 앞 날짜 파일을 바탕으로 만들면 어제 사진이 파일 안에 남아 매일 커진다.
+        // 다른 그림이 같이 쓰지 않는 옛 이미지면 지운다.
+        if (!string.IsNullOrEmpty(oldId)
+            && !wsPart.DrawingsPart.WorksheetDrawing.Descendants<DocumentFormat.OpenXml.Drawing.Blip>()
+                     .Any(b => b.Embed?.Value == oldId))
+        {
+            try { wsPart.DrawingsPart.DeletePart(oldId); } catch { /* 못 지우면 그대로 둔다 */ }
+        }
         return true;
     }
 

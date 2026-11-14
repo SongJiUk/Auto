@@ -105,6 +105,7 @@ public class FieldEditRow : ViewModelBase
         fc.ShapeNames  = _orig.ShapeNames;
         fc.Presets     = _orig.Presets;
         fc.Placeholder = _orig.Placeholder;
+        fc.SpecCol     = _orig.SpecCol;
         // 여러 줄 칸: 시작 칸을 안 바꿨으면 원래 칸 목록(줄 수 포함) 유지
         if (Type == FieldTypes.Multiline && _orig.Cells is { Count: > 0 }
             && string.Equals(_orig.Cells[0], _cellAddress, StringComparison.OrdinalIgnoreCase))

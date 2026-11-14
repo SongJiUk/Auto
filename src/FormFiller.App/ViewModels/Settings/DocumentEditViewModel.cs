@@ -233,5 +233,6 @@ public class DocumentEditViewModel : ViewModelBase
         SheetNames        = _original.SheetNames.Contains(SelectedSheet) ? _original.SheetNames : [],
         PhotoFolder       = _original.PhotoFolder,
         SaveMode          = _original.SaveMode,
+        UsePreviousAsBase = _original.UsePreviousAsBase,
     };
 }

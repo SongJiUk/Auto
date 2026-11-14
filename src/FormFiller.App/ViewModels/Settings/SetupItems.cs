@@ -257,10 +257,13 @@ public class SetupItemViewModel : ViewModelBase
         item.EndRow     = f.EndRow;
         void Col(string k, string? v) { if (!string.IsNullOrEmpty(v)) item.Cols[k] = v; }
         Col("name", f.NameCol); Col("prev", f.PrevDayCol); Col("today", f.TodayCol);
+        item._specCol = f.SpecCol;   // 화면에서 고르지 않는 값 — 그대로 보존
         Col("role", f.RoleCol); Col("prevCum", f.PrevCumulativeCol);
         foreach (var p in f.Presets ?? []) item.Presets.Add(new PresetItemViewModel(p, item, host));
         return item;
     }
+
+    private string? _specCol;
 
     public FieldConfig ToConfig()
     {
@@ -288,6 +291,7 @@ public class SetupItemViewModel : ViewModelBase
             case FieldTypes.EquipmentTable:
                 f.StartRow = StartRow; f.EndRow = EndRow;
                 f.NameCol = ColOf("name"); f.PrevDayCol = ColOf("prev"); f.TodayCol = ColOf("today");
+                f.SpecCol = _specCol;
                 break;
             case FieldTypes.PersonnelTable:
                 f.StartRow = StartRow; f.EndRow = EndRow;

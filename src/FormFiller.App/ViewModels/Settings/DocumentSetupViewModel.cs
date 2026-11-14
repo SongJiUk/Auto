@@ -653,6 +653,7 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
                 // 이 화면에서 다루지 않는 값은 기존 설정을 그대로 유지
                 SaveMode          = _editing?.SaveMode ?? "create",
                 PhotoFolder       = _editing?.PhotoFolder ?? "",
+                UsePreviousAsBase = _editing?.UsePreviousAsBase ?? true,
             };
 
             int idx = config.Documents.FindIndex(d => d.Id == id);

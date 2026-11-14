@@ -42,6 +42,46 @@ public static class GenericExcelWriter
     /// 더해서 누계를 구한다. 전일 열 설정이 없을 때만 수식 칸 값을 읽는다.
     /// </remarks>
     public static void LoadPreviousDay(string prevFilePath, DailyInput input, DocumentConfig dailyDoc)
+        => LoadPreviousDayCore(prevFilePath, input, dailyDoc);
+
+    /// <summary>
+    /// 파일(앞 날짜 파일 또는 서식)의 장비·인원 표에 적힌 줄 목록을 읽는다.
+    /// 화면의 장비·인원 줄을 이것으로 만들어서, 파일에 있는 줄(예: B/H 6W, 세륜기)이 빠지지 않게 한다.
+    /// </summary>
+    public static (List<(string Name, string Spec)> Equipment, List<string> Roles) ReadTableRows(
+        string filePath, DocumentConfig dailyDoc)
+    {
+        var eq = new List<(string, string)>();
+        var roles = new List<string>();
+        if (!File.Exists(filePath)) return (eq, roles);
+
+        using var doc  = SpreadsheetDocument.Open(filePath, isEditable: false);
+        var       ws   = CellHelper.FindWorksheetPart(doc.WorkbookPart!, dailyDoc.SheetName);
+        if (ws == null) return (eq, roles);
+
+        var eqField = dailyDoc.Fields.FirstOrDefault(f => f.Type == FieldTypes.EquipmentTable);
+        if (eqField is { NameCol.Length: > 0 })
+            for (int row = eqField.StartRow; row <= eqField.EndRow; row++)
+            {
+                string? name = CellHelper.GetCellValue(ws, $"{eqField.NameCol}{row}")?.Trim();
+                if (string.IsNullOrEmpty(name)) continue;
+                string spec = string.IsNullOrEmpty(eqField.SpecCol) ? ""
+                            : CellHelper.GetCellValue(ws, $"{eqField.SpecCol}{row}")?.Trim() ?? "";
+                eq.Add((name, spec));
+            }
+
+        var pnField = dailyDoc.Fields.FirstOrDefault(f => f.Type == FieldTypes.PersonnelTable);
+        if (pnField is { RoleCol.Length: > 0 })
+            for (int row = pnField.StartRow; row <= pnField.EndRow; row++)
+            {
+                string? role = CellHelper.GetCellValue(ws, $"{pnField.RoleCol}{row}")?.Trim();
+                if (!string.IsNullOrEmpty(role)) roles.Add(role);
+            }
+
+        return (eq, roles);
+    }
+
+    private static void LoadPreviousDayCore(string prevFilePath, DailyInput input, DocumentConfig dailyDoc)
     {
         if (!File.Exists(prevFilePath)) return;
 
@@ -151,11 +191,15 @@ public static class GenericExcelWriter
     {
         // ── 1. 경로 계산 ─────────────────────────────────────────────
         string templatePath = Path.Combine(baseDir, docConfig.TemplateFile);
-        if (!File.Exists(templatePath))
+        string outputPath   = BuildOutputPath(input.Date, docConfig.OutputPattern, baseDir, outputFolder);
+
+        // 바탕 파일: 앞 날짜 파일이 있으면 그것 (엑셀만), 없으면 등록한 서식
+        string basePath = BaseFileFor(input.Date, docConfig, baseDir, outputFolder, out var prevDate);
+        if (!File.Exists(basePath))
             throw new FileNotFoundException(
                 $"템플릿 파일을 찾을 수 없습니다.\n경로: {templatePath}");
-
-        string outputPath = BuildOutputPath(input.Date, docConfig.OutputPattern, baseDir, outputFolder);
+        if (prevDate != null)
+            notes?.Add($"{docConfig.Name}: {prevDate:MM'/'dd} 파일을 바탕으로 만들었습니다 (지정하지 않은 칸은 그날 값 그대로)");
 
         // 같은 날짜 파일이 이미 있으면 덮어쓰기 전에 "백업" 폴더에 남긴다
         string? backup = OutputBackup.BackupIfExists(outputPath);
@@ -170,9 +214,9 @@ public static class GenericExcelWriter
             return outputPath;
         }
 
-        // ── 2. 원본 복사 — samples/ 는 절대 수정하지 않는다 ──────────
+        // ── 2. 바탕 파일 복사 — 서식·앞 날짜 파일은 절대 수정하지 않는다 ──
         EnsureDirectoryExists(outputPath);
-        File.Copy(templatePath, outputPath, overwrite: true);
+        File.Copy(basePath, outputPath, overwrite: true);
 
         // ── 3. 복사본을 편집 모드로 열기 ─────────────────────────────
         using var doc    = SpreadsheetDocument.Open(outputPath, isEditable: true);
@@ -195,6 +239,25 @@ public static class GenericExcelWriter
         wbPart.Workbook.Save();
 
         return outputPath;
+    }
+
+    /// <summary>
+    /// 이 날짜 파일을 만들 때 복사할 바탕 파일.
+    /// UsePreviousAsBase 이고 엑셀 서식이면 앞 날짜 파일(있으면), 아니면 등록한 서식.
+    /// </summary>
+    public static string BaseFileFor(DateTime date, DocumentConfig doc, string baseDir, string outputFolder,
+                                     out DateTime? prevDate)
+    {
+        prevDate = null;
+        string templatePath = Path.Combine(baseDir, doc.TemplateFile);
+        if (!doc.UsePreviousAsBase || HwpxWriter.IsHwpx(templatePath)
+            || !doc.OutputPattern.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase))
+            return templatePath;
+
+        var prev = FindPreviousFile(date, doc.OutputPattern, baseDir, outputFolder);
+        if (prev == null) return templatePath;
+        prevDate = prev.Value.Date;
+        return prev.Value.Path;
     }
 
     /// <summary>필드 하나를 쓸 때 필요한 정보 묶음</summary>
@@ -264,7 +327,7 @@ public static class GenericExcelWriter
             {
                 string v = GetSimpleValue(field, input, docConfig.Id, c.Sheet) ?? "";
                 if (v.Length > 0) WriteString(c, field.Cell, v);
-                else c.Notes?.Add($"[{c.Sheet}] {field.Label}: 입력 없음 → 서식 값 그대로");
+                else c.Notes?.Add($"[{c.Sheet}] {field.Label}: 입력 없음 → 바탕 파일 값 그대로");
                 break;
             }
 
@@ -295,13 +358,13 @@ public static class GenericExcelWriter
 
             // ── 장비 투입현황 테이블 ──────────────────────────────────
             case FieldTypes.EquipmentTable:
-                WriteEquipmentTable(wsPart, input.Equipment, field);
+                WriteEquipmentTable(c, input.Equipment, field);
                 break;
 
             // ── 인원 투입현황 테이블 ─────────────────────────────────
             // docConfig.IncludesSujangjae = true 이면 수장재 포함 목록 사용
             case FieldTypes.PersonnelTable:
-                WritePersonnelTable(wsPart, input.GetPersonnelFor(docConfig.IncludesSujangjae), field);
+                WritePersonnelTable(c, input.GetPersonnelFor(docConfig.IncludesSujangjae), field);
                 break;
 
             // ── 금일 대수 > 0 장비명 쉼표 연결 ──────────────────────
@@ -346,14 +409,14 @@ public static class GenericExcelWriter
                 if (!ok) c.Notes?.Add($"[{c.Sheet}] {field.Label}: {field.Cell} 칸에 그림이 없어 사진을 넣지 못함");
             }
             else
-                c.Notes?.Add($"[{c.Sheet}] {field.Label}: 사진 없음 → 서식 그림 그대로");
+                c.Notes?.Add($"[{c.Sheet}] {field.Label}: 사진 없음 → 바탕 파일(서식·앞 날짜) 사진 그대로");
         }
 
         if (!string.IsNullOrEmpty(field.ValueCell))
         {
             string v = WithSuffix(c.Input.GetDocValue(docId, c.Sheet, field.Id + DailyInput.ValueSuffixKey), field.Suffix);
             if (v.Length > 0) WriteString(c, field.ValueCell, v);
-            else c.Notes?.Add($"[{c.Sheet}] {field.Label}: 측정값 없음 → 서식 값 그대로");
+            else c.Notes?.Add($"[{c.Sheet}] {field.Label}: 측정값 없음 → 바탕 파일 값 그대로");
         }
     }
 
@@ -373,61 +436,79 @@ public static class GenericExcelWriter
         }
     }
 
+    /// <summary>장비 투입현황: 장비명 열로 줄을 찾아 전일·금일을 쓴다.</summary>
+    private static void WriteEquipmentTable(WriteContext c, List<EquipmentEntry> equipment, FieldConfig field) =>
+        WriteCountTable(c, field, field.NameCol, field.SpecCol, field.PrevDayCol,
+            equipment.Select(e => new CountRow(e.Name, e.Spec, e.PrevDayCount, e.TodayCount)).ToList());
+
+    /// <summary>인원 투입현황: 직종 열로 줄을 찾아 전일누계·금일을 쓴다.</summary>
+    private static void WritePersonnelTable(WriteContext c, List<PersonnelEntry> personnel, FieldConfig field) =>
+        WriteCountTable(c, field, field.RoleCol, null, field.PrevCumulativeCol,
+            personnel.Select(p => new CountRow(p.Role, "", p.PrevCumulativeCount, p.TodayCount)).ToList());
+
+    private sealed record CountRow(string Key, string Spec, int Prev, int Today);
+
     /// <summary>
-    /// 장비 투입현황 테이블에 PrevDayCount 와 TodayCount 를 쓴다.
-    /// NameCol 로 행을 찾고, 없는 행은 건너뛴다.
-    /// 누계 열(TodayCol+2)은 수식이므로 절대 쓰지 않는다.
+    /// 장비·인원 표 공통.
+    /// - 화면에 있는 줄: 전일·금일을 쓴다.
+    /// - 파일에만 있는 줄(화면에서 지운 줄): 금일을 0 으로, 전일은 "전일 + 어제 금일" 로 넘겨 누계가 끊기지 않게 한다.
+    /// - 화면에만 있는 줄(새로 추가한 장비·직종): 표의 빈 줄에 이름(·규격)과 값을 쓴다.
+    /// - 누계 열(금일 + 2)은 수식이면 두고, 숫자로 적혀 있으면 전일 + 금일 을 써 준다.
     /// </summary>
-    private static void WriteEquipmentTable(WorksheetPart wsPart,
-                                            List<EquipmentEntry> equipment,
-                                            FieldConfig field)
+    private static void WriteCountTable(WriteContext c, FieldConfig field, string? keyCol, string? specCol,
+                                        string? prevCol, List<CountRow> rows)
     {
-        if (string.IsNullOrEmpty(field.NameCol) ||
-            string.IsNullOrEmpty(field.PrevDayCol) ||
-            string.IsNullOrEmpty(field.TodayCol))
+        string? todayCol = field.TodayCol;
+        if (string.IsNullOrEmpty(keyCol) || string.IsNullOrEmpty(prevCol) || string.IsNullOrEmpty(todayCol))
             return;
+        var ws = c.Ws;
+        string cumCol = IndexToColLetter(CellHelper.ColLetterToIndex(todayCol) + 2);
 
-        for (int row = field.StartRow; row <= field.EndRow; row++)
+        void SetCounts(int row, int prev, int today)
         {
-            string nameAddr = $"{field.NameCol}{row}";
-            string? cellName = CellHelper.GetCellValue(wsPart, nameAddr);
-            if (string.IsNullOrWhiteSpace(cellName)) continue;
-
-            var entry = equipment.FirstOrDefault(e => NormName(e.Name) == NormName(cellName));
-            if (entry == null) continue;
-
-            // F열 = 전일(대), H열 = 금일(대) — 누계(J열)는 수식이므로 쓰지 않는다
-            CellHelper.SetCellInt(wsPart, $"{field.PrevDayCol}{row}", entry.PrevDayCount);
-            CellHelper.SetCellInt(wsPart, $"{field.TodayCol}{row}",   entry.TodayCount);
+            if (!CellHelper.HasFormula(ws, $"{prevCol}{row}"))  CellHelper.SetCellInt(ws, $"{prevCol}{row}", prev);
+            if (!CellHelper.HasFormula(ws, $"{todayCol}{row}")) CellHelper.SetCellInt(ws, $"{todayCol}{row}", today);
+            if (!CellHelper.HasFormula(ws, $"{cumCol}{row}"))   CellHelper.SetCellInt(ws, $"{cumCol}{row}", prev + today);
         }
-    }
 
-    /// <summary>
-    /// 인원 투입현황 테이블에 PrevCumulativeCount 와 TodayCount 를 쓴다.
-    /// RoleCol 로 행을 찾는다.
-    /// 총누계 열(TodayCol+2)은 수식이므로 절대 쓰지 않는다.
-    /// </summary>
-    private static void WritePersonnelTable(WorksheetPart wsPart,
-                                            List<PersonnelEntry> personnel,
-                                            FieldConfig field)
-    {
-        if (string.IsNullOrEmpty(field.RoleCol) ||
-            string.IsNullOrEmpty(field.PrevCumulativeCol) ||
-            string.IsNullOrEmpty(field.TodayCol))
-            return;
-
+        var used      = new bool[rows.Count];
+        var emptyRows = new List<int>();
         for (int row = field.StartRow; row <= field.EndRow; row++)
         {
-            string roleAddr = $"{field.RoleCol}{row}";
-            string? cellRole = CellHelper.GetCellValue(wsPart, roleAddr);
-            if (string.IsNullOrWhiteSpace(cellRole)) continue;
+            string? name = CellHelper.GetCellValue(ws, $"{keyCol}{row}");
+            if (string.IsNullOrWhiteSpace(name)) { emptyRows.Add(row); continue; }
 
-            var entry = personnel.FirstOrDefault(p => NormName(p.Role) == NormName(cellRole));
-            if (entry == null) continue;
+            int idx = -1;
+            for (int i = 0; i < rows.Count; i++)
+                if (!used[i] && NormName(rows[i].Key) == NormName(name)) { idx = i; break; }
 
-            // N열 = 전일누계(명), P열 = 금일(명) — 총누계(R열)는 수식이므로 쓰지 않는다
-            CellHelper.SetCellInt(wsPart, $"{field.PrevCumulativeCol}{row}", entry.PrevCumulativeCount);
-            CellHelper.SetCellInt(wsPart, $"{field.TodayCol}{row}",          entry.TodayCount);
+            if (idx >= 0)
+            {
+                used[idx] = true;
+                SetCounts(row, rows[idx].Prev, rows[idx].Today);
+            }
+            else
+            {
+                int p = CellHelper.GetCellInt(ws, $"{prevCol}{row}") ?? 0;
+                int t = CellHelper.GetCellInt(ws, $"{todayCol}{row}") ?? 0;
+                SetCounts(row, p + t, 0);
+            }
+        }
+
+        for (int i = 0; i < rows.Count; i++)
+        {
+            if (used[i] || string.IsNullOrWhiteSpace(rows[i].Key)) continue;
+            if (emptyRows.Count == 0)
+            {
+                c.Notes?.Add($"[{c.Sheet}] {field.Label}: 빈 줄이 없어 '{rows[i].Key}' 을(를) 넣지 못함");
+                continue;
+            }
+            int row = emptyRows[0];
+            emptyRows.RemoveAt(0);
+            CellHelper.SetCellString(c.Package, ws, $"{keyCol}{row}", rows[i].Key);
+            if (!string.IsNullOrEmpty(specCol) && rows[i].Spec.Length > 0)
+                CellHelper.SetCellString(c.Package, ws, $"{specCol}{row}", rows[i].Spec);
+            SetCounts(row, rows[i].Prev, rows[i].Today);
         }
     }
 
