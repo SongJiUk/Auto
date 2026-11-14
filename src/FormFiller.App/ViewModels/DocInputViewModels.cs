@@ -51,8 +51,8 @@ public class DocInputCardViewModel : ViewModelBase
             Sheets.Add(new SheetInputViewModel(config, sheet));
         SelectedSheet = Sheets.FirstOrDefault();
 
-        ImportPhotosCommand = new RelayCommand(_ => ImportPhotos());
-        ChangeFolderCommand = new RelayCommand(_ => { if (PickFolder()) ImportPhotos(); });
+        ImportPhotosCommand = new RelayCommand(_ => ImportPhotos(), _ => !IsImporting);
+        ChangeFolderCommand = new RelayCommand(_ => { if (PickFolder()) ImportPhotos(); }, _ => !IsImporting);
     }
 
     /// <summary>입력된 값을 DailyInput.DocValues 에 넣는다.</summary>
@@ -85,21 +85,39 @@ public class DocInputCardViewModel : ViewModelBase
     /// - 칸에 시각(예: 10:00)이 정해져 있으면 촬영 시각이 가장 가까운 사진(±40분 안)을 넣는다
     /// - 시각이 없으면 찍은 순서대로 넣는다
     /// </summary>
-    private void ImportPhotos()
+    private bool _isImporting;
+    /// <summary>사진 폴더를 읽는 중 (버튼 글자를 바꾸고 다시 누르지 못하게)</summary>
+    public bool IsImporting
     {
+        get => _isImporting;
+        private set { if (SetField(ref _isImporting, value)) { OnPropertyChanged(nameof(ImportButtonText)); CommandManager.InvalidateRequerySuggested(); } }
+    }
+    public string ImportButtonText => _isImporting ? "⏳ 사진 찾는 중…" : "📂 폴더에서 오늘 사진 불러오기";
+
+    private async void ImportPhotos()
+    {
+        if (IsImporting) return;
         if ((string.IsNullOrEmpty(Config.PhotoFolder) || !Directory.Exists(Config.PhotoFolder)) && !PickFolder())
             return;
 
-        DateTime day = _getDate().Date;
-        var exts = new[] { ".jpg", ".jpeg", ".png" };
-        var all = Directory.EnumerateFiles(Config.PhotoFolder, "*.*", SearchOption.AllDirectories)
-            .Where(f => exts.Contains(Path.GetExtension(f).ToLowerInvariant()))
-            .Select(f => (Path: f, Taken: PhotoService.GetTakenTime(f)))
-            .Where(p => p.Taken.Date == day)
-            .OrderBy(p => p.Taken)
-            .ToList();
+        DateTime day    = _getDate().Date;
+        string   folder = Config.PhotoFolder;
+        List<(string Path, DateTime Taken)> all;
+        int heic;
+        IsImporting = true;
+        try
+        {
+            (all, heic) = await BackgroundWork.RunSta(() => FindPhotosTakenOn(folder, day));
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error($"사진 폴더 읽기 실패: {folder}", ex);
+            MessageBox.Show($"사진 폴더를 읽지 못했습니다.\n{folder}\n\n{ex.Message}", "사진 불러오기",
+                            MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        finally { IsImporting = false; }
 
-        int heic = Directory.EnumerateFiles(Config.PhotoFolder, "*.heic", SearchOption.AllDirectories).Count();
         var report = new List<string>();
 
         foreach (var sheet in Sheets)
@@ -145,6 +163,31 @@ public class DocInputCardViewModel : ViewModelBase
             msg += $"\n\n※ HEIC 사진 {heic}장은 읽을 수 없습니다. 폰 카메라 설정을 '호환성 우선(JPG)'으로 바꿔 주세요.";
         msg += "\n\n잘못 들어간 사진은 사진 칸을 눌러 바꿀 수 있습니다.";
         MessageBox.Show(msg, "사진 불러오기", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    /// <summary>
+    /// 폴더(하위 폴더 포함)에서 day 에 찍은 사진을 찾는다. 뒤 스레드에서 돈다.
+    /// 사진을 열어 촬영 시각을 읽는 건 느려서(드라이브면 사진마다 내려받음),
+    /// 파일 시각이 그날보다 이전인 사진은 열지 않고 건너뛴다.
+    /// (찍은 뒤에 저장·복사되므로 파일 시각은 촬영 시각보다 앞설 수 없다)
+    /// </summary>
+    private static (List<(string Path, DateTime Taken)> Photos, int Heic) FindPhotosTakenOn(string folder, DateTime day)
+    {
+        var exts = new[] { ".jpg", ".jpeg", ".png" };
+        var photos = new List<(string Path, DateTime Taken)>();
+        int heic = 0;
+
+        foreach (var fi in new DirectoryInfo(folder).EnumerateFiles("*.*", SearchOption.AllDirectories))
+        {
+            string ext = fi.Extension.ToLowerInvariant();
+            if (ext == ".heic") { heic++; continue; }
+            if (!exts.Contains(ext)) continue;
+            if (fi.LastWriteTime < day && fi.CreationTime < day) continue;   // 그날 이전 파일
+
+            DateTime taken = PhotoService.GetTakenTime(fi.FullName);
+            if (taken.Date == day) photos.Add((fi.FullName, taken));
+        }
+        return (photos.OrderBy(p => p.Taken).ToList(), heic);
     }
 
     private static string Norm(string s) => s.Replace(" ", "").ToLowerInvariant();
@@ -207,17 +250,41 @@ public class FieldInputViewModel : ViewModelBase
         {
             if (SetField(ref _photoPath, value))
             {
-                Thumbnail = value == null ? null : PhotoService.LoadOrientedThumbnail(value);
+                Thumbnail = null;
+                PhotoInfo = value == null ? "" : "불러오는 중…";
                 OnPropertyChanged(nameof(HasPhoto));
-                OnPropertyChanged(nameof(PhotoInfo));
+                if (value != null) _ = LoadPreviewAsync(value);
             }
+        }
+    }
+
+    /// <summary>미리보기와 촬영 시각은 파일을 읽어야 해서(드라이브면 느림) 뒤에서 읽는다.</summary>
+    private async Task LoadPreviewAsync(string path)
+    {
+        try
+        {
+            var (thumb, taken) = await BackgroundWork.RunSta(() =>
+            {
+                var t = PhotoService.LoadOrientedThumbnail(path);
+                if (t is { CanFreeze: true, IsFrozen: false }) t.Freeze();
+                return (t, PhotoService.GetTakenTime(path));
+            });
+            if (_photoPath != path) return;   // 그 사이 다른 사진으로 바뀜
+            Thumbnail = thumb;
+            PhotoInfo = $"촬영 {taken:HH:mm}";
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error($"사진 미리보기 실패: {path}", ex);
+            if (_photoPath == path) PhotoInfo = "미리보기 실패";
         }
     }
 
     public bool HasPhoto => _photoPath != null;
 
+    private string _photoInfo = "";
     /// <summary>사진 아래에 보여 줄 촬영 시각</summary>
-    public string PhotoInfo => _photoPath == null ? "" : $"촬영 {PhotoService.GetTakenTime(_photoPath):HH:mm}";
+    public string PhotoInfo { get => _photoInfo; private set => SetField(ref _photoInfo, value); }
 
     private BitmapSource? _thumbnail;
     public BitmapSource? Thumbnail { get => _thumbnail; private set => SetField(ref _thumbnail, value); }

@@ -840,7 +840,7 @@
                                     <!-- 사진 폴더 불러오기 -->
                                     <DockPanel Margin="0,0,0,8"
                                                Visibility="{Binding HasPhotos, Converter={StaticResource BoolVis}}">
-                                        <Button DockPanel.Dock="Left" Content="📂 폴더에서 오늘 사진 불러오기"
+                                        <Button DockPanel.Dock="Left" Content="{Binding ImportButtonText}"
                                                 Command="{Binding ImportPhotosCommand}"
                                                 Padding="10,4" Background="#2B6CB0" Foreground="White"
                                                 BorderThickness="0" Cursor="Hand"/>

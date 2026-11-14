@@ -116,9 +116,17 @@ public class PhotoSlotViewModel : ViewModelBase
             SelectedImagePath = dlg.FileName;
     }
 
-    private void LoadThumbnail(string? path)
+    /// <summary>미리보기는 파일을 읽어야 해서(드라이브면 느림) 뒤에서 읽는다.</summary>
+    private async void LoadThumbnail(string? path)
     {
-        Thumbnail = path != null ? PhotoService.LoadThumbnail(path) : null;
+        Thumbnail = null;
+        if (path == null) return;
+        try
+        {
+            var thumb = await BackgroundWork.RunSta(() => PhotoService.LoadThumbnail(path));
+            if (_selectedImagePath == path) Thumbnail = thumb;
+        }
+        catch (Exception ex) { FormFiller.Core.Config.AppLog.Error($"사진 미리보기 실패: {path}", ex); }
     }
 
     /// <summary>드래그&드롭으로 받은 파일 경로를 처리한다.</summary>

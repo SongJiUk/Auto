@@ -18,11 +18,11 @@ public class GenerateViewModel : ViewModelBase
     public string Title { get; }
     public ObservableCollection<DocCheckItem> Docs { get; }
 
-    private readonly Func<IReadOnlyList<DocCheckItem>, List<string>> _run;
+    private readonly Func<IReadOnlyList<DocCheckItem>, Task<List<string>>> _run;
     private readonly string _outputDir;
 
     public GenerateViewModel(DateTime date, IEnumerable<DocCheckItem> docs, string outputDir,
-                             Func<IReadOnlyList<DocCheckItem>, List<string>> run)
+                             Func<IReadOnlyList<DocCheckItem>, Task<List<string>>> run)
     {
         Title      = $"{date:yyyy-MM-dd (ddd)} 파일 생성";
         Docs       = new ObservableCollection<DocCheckItem>(docs);
@@ -30,7 +30,7 @@ public class GenerateViewModel : ViewModelBase
         _run       = run;
         _openAfter = AppConfigLoader.Load().OpenAfterGenerate;
 
-        GenerateCommand   = new RelayCommand(_ => Generate(), _ => !IsDone && GeneratableCount > 0);
+        GenerateCommand   = new RelayCommand(_ => Generate(), _ => !IsDone && !IsRunning && GeneratableCount > 0);
         OpenFolderCommand = new RelayCommand(_ => OpenFolder());
         OpenAllCommand    = new RelayCommand(_ => { foreach (var d in Docs) d.Open(); });
     }
@@ -45,7 +45,20 @@ public class GenerateViewModel : ViewModelBase
         ? "✔ 확인할 것이 없습니다. 바로 생성하세요."
         : $"확인할 것 {WarningCount}건 · 빨간 항목이 있는 문서는 만들지 않습니다.";
 
-    public string GenerateButtonText => $"📄  {GeneratableCount}개 생성";
+    public string GenerateButtonText => _isRunning ? "⏳ 만드는 중…" : $"📄  {GeneratableCount}개 생성";
+
+    private bool _isRunning;
+    /// <summary>만드는 중 (창을 닫거나 다시 누르지 못하게)</summary>
+    public bool IsRunning
+    {
+        get => _isRunning;
+        private set
+        {
+            if (!SetField(ref _isRunning, value)) return;
+            OnPropertyChanged(nameof(GenerateButtonText));
+            CommandManager.InvalidateRequerySuggested();
+        }
+    }
 
     private bool _openAfter;
     /// <summary>생성 후 바로 Excel 로 열기 (다음에도 기억)</summary>
@@ -90,13 +103,20 @@ public class GenerateViewModel : ViewModelBase
     public ICommand OpenFolderCommand { get; }
     public ICommand OpenAllCommand    { get; }
 
-    private void Generate()
+    private async void Generate()
     {
+        if (IsRunning) return;
         var targets = Docs.Where(d => !d.HasError).ToList();
         List<string> notes;
-        Mouse.OverrideCursor = Cursors.Wait;
-        try { notes = _run(targets); }
-        finally { Mouse.OverrideCursor = null; }
+        IsRunning = true;
+        try { notes = await _run(targets); }
+        catch (Exception ex)
+        {
+            AppLog.Error("파일 생성 중 오류", ex);
+            notes = [$"생성 중 오류: {ex.Message}"];
+            foreach (var t in targets.Where(t => t.State == DocResultState.Pending)) t.SetFailed(ex.Message);
+        }
+        finally { IsRunning = false; }
 
         foreach (var d in Docs.Where(d => d.HasError))
             d.SetSkipped();

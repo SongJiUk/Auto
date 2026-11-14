@@ -466,7 +466,7 @@ public class MainViewModel : ViewModelBase
             foreach (var c in group)
                 c.Warn($"다른 문서({string.Join(", ", group.Where(o => o != c).Select(o => o.Name))})와 저장 파일 이름이 같아 서로 덮어씁니다. 설정에서 파일 이름을 바꿔 주세요.");
         var vm = new GenerateViewModel(TargetDate, checks, Path.Combine(baseDir, config.OutputFolder),
-                                       targets => RunGenerate(targets, config, baseDir));
+                                       targets => RunGenerateAsync(targets, config, baseDir));
         new GenerateWindow(vm) { Owner = Application.Current.MainWindow }.ShowDialog();
     }
 
@@ -489,7 +489,7 @@ public class MainViewModel : ViewModelBase
             if (IsFileLocked(c.OutputPath))
                 c.Error("같은 날짜 파일이 Excel에서 열려 있어 저장할 수 없습니다. Excel에서 닫고 다시 누르세요.");
             else
-                c.Warn("이 날짜 파일이 이미 있습니다. 새로 만들면 덮어씁니다.");
+                c.Warn("이 날짜 파일이 이미 있습니다. 새로 만들면 덮어씁니다(앞의 파일은 출력 폴더 안 백업 폴더에 남깁니다).");
         }
 
         // 작업사항
@@ -519,7 +519,7 @@ public class MainViewModel : ViewModelBase
 
         // 전일 값: 이전 파일이 없으면 화면에 입력한 값이 기준이 된다
         if (doc.Id == "daily_report" && Has(doc, FieldTypes.EquipmentTable, FieldTypes.PersonnelTable)
-            && FindPreviousDailyReport(config, doc) == null)
+            && !HasPrevFile)
             c.Warn("이전 날짜 공사일보가 없어 화면의 전일 값을 기준으로 씁니다. 첫날이면 전일·누계가 맞는지 확인하세요.");
 
         // 사진·측정값 (시트마다 한 줄로 묶어서)
@@ -561,34 +561,60 @@ public class MainViewModel : ViewModelBase
     }
 
     /// <summary>확인 창에서 [생성] 을 누르면 호출된다. 문서마다 따로 만들어, 하나가 실패해도 나머지는 만든다.</summary>
-    private List<string> RunGenerate(IReadOnlyList<DocCheckItem> targets, AppConfig config, string baseDir)
+    /// <remarks>
+    /// 화면 값은 여기(화면 스레드)에서 모두 꺼내 두고, 파일 쓰기·사진 줄이기는 뒤 스레드에서 한다.
+    /// 그래서 만드는 동안에도 창이 멈추지 않는다.
+    /// </remarks>
+    private async Task<List<string>> RunGenerateAsync(IReadOnlyList<DocCheckItem> targets, AppConfig config, string baseDir)
     {
-        var notes = new List<string>();
         // 전일 값은 날짜를 고를 때 이미 이전 파일에서 읽어 화면에 넣어 두었다.
         // 사용자가 화면에서 고친 값을 존중하려고 여기서는 다시 읽지 않는다.
         var input = BuildDailyInput();
-
         foreach (var card in DocInputCards)
             card.FillInput(input);
 
-        foreach (var t in targets)
-        {
-            try
-            {
-                GenericExcelWriter.Generate(input, t.Config, baseDir, config.OutputFolder,
-                                            PhotoService.ResizeToCover, notes);
-                t.SetDone();
-            }
-            catch (Exception ex)
-            {
-                t.SetFailed(ex.Message);
-            }
-        }
+        var docs   = targets.Select(t => t.Config).ToList();
+        var photos = PhotoSlots.Where(s => s.HasPhoto)
+            .Select(s => new PhotoJob(s.DocumentId, s.SheetName, s.SlotIndex, s.Label,
+                                      s.SelectedImagePath!, s.TargetWidthPx, s.TargetHeightPx))
+            .ToList();
+        DateTime date = TargetDate;
+        AppLog.Info($"파일 생성 시작: {date:yyyy-MM-dd}, 문서 {docs.Count}개 ({string.Join(", ", docs.Select(d => d.Name))})");
 
-        var doneIds = targets.Where(t => t.IsOk).Select(t => t.Config.Id).ToHashSet();
-        InsertPhotos(doneIds, config, baseDir, notes);
+        var (errors, notes) = await BackgroundWork.RunSta(() =>
+        {
+            var errs  = new string?[docs.Count];
+            var notes = new List<string>();
+            for (int i = 0; i < docs.Count; i++)
+            {
+                try
+                {
+                    GenericExcelWriter.Generate(input, docs[i], baseDir, config.OutputFolder,
+                                                PhotoService.ResizeToCover, notes);
+                }
+                catch (Exception ex)
+                {
+                    errs[i] = ex.Message;
+                    AppLog.Error($"문서 생성 실패: {docs[i].Name}", ex);
+                }
+            }
+            var doneIds = docs.Where((_, i) => errs[i] == null).Select(d => d.Id).ToHashSet();
+            InsertPhotos(photos, doneIds, date, config, baseDir, notes);
+            return (errs, notes);
+        });
+
+        for (int i = 0; i < targets.Count; i++)
+        {
+            if (errors[i] == null) targets[i].SetDone();
+            else                   targets[i].SetFailed(errors[i]!);
+        }
+        AppLog.Info($"파일 생성 끝: 성공 {errors.Count(e => e == null)}개, 실패 {errors.Count(e => e != null)}개");
         return notes;
     }
+
+    /// <summary>사진대지 칸 하나에 넣을 사진 (뒤 스레드로 넘기려고 화면 값을 복사해 둔 것)</summary>
+    private sealed record PhotoJob(string DocumentId, string SheetName, int SlotIndex, string Label,
+                                   string ImagePath, int Width, int Height);
 
     private DailyInput BuildDailyInput() => new()
     {
@@ -700,34 +726,64 @@ public class MainViewModel : ViewModelBase
         GenericExcelWriter.FindPreviousFile(TargetDate, dailyDoc.OutputPattern,
                                             AppDomain.CurrentDomain.BaseDirectory, config.OutputFolder);
 
-    private void LoadPreviousData()
+    // 날짜를 빠르게 여러 번 바꾸면 앞의 읽기 결과는 버리고 마지막 것만 화면에 넣는다
+    private int _prevLoadVersion;
+
+    /// <summary>
+    /// 이전 공사일보를 찾아 전일 값을 읽는다. 파일 찾기·엑셀 읽기는 뒤 스레드에서 해서 창이 멈추지 않는다.
+    /// </summary>
+    private async void LoadPreviousData()
     {
-        var config   = AppConfigLoader.Load();
-        var dailyDoc = config.Documents.FirstOrDefault(d => d.Id == "daily_report");
-        if (dailyDoc == null) { PrevSourceText = ""; HasPrevFile = false; return; }
-
-        var prev = FindPreviousDailyReport(config, dailyDoc);
-        HasPrevFile = prev != null;
-        if (prev == null)
+        int version = ++_prevLoadVersion;
+        try
         {
-            PrevSourceText = "이전 날짜에 만든 공사일보가 없습니다. 처음 쓰는 날이면 '전일(대)'와 '전일누계(명)'에 " +
-                             "지금까지의 누계를 직접 입력하세요. 이 값이 기준이 되어 다음 날부터는 자동으로 이어집니다.";
-            return;
-        }
+            var config   = AppConfigLoader.Load();
+            var dailyDoc = config.Documents.FirstOrDefault(d => d.Id == "daily_report");
+            if (dailyDoc == null) { PrevSourceText = ""; HasPrevFile = false; return; }
 
-        // 화면 목록과 같은 순서의 DailyInput 을 만들어 Core 에서 채운 뒤 다시 화면에 옮긴다
-        var input = BuildDailyInput();
-        try { GenericExcelWriter.LoadPreviousDay(prev.Value.Path, input, dailyDoc); }
+            PrevSourceText = "이전 공사일보에서 전일 값을 불러오는 중…";
+            DateTime date    = TargetDate;
+            string   baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            // 화면 목록과 같은 순서의 DailyInput 을 만들어 Core 에서 채운 뒤 다시 화면에 옮긴다
+            var input = BuildDailyInput();
+
+            var (prev, error) = await Task.Run(() =>
+            {
+                var p = GenericExcelWriter.FindPreviousFile(date, dailyDoc.OutputPattern, baseDir, config.OutputFolder);
+                if (p == null) return (p, (Exception?)null);
+                try { GenericExcelWriter.LoadPreviousDay(p.Value.Path, input, dailyDoc); return (p, (Exception?)null); }
+                catch (Exception ex) { return (p, ex); }
+            });
+            if (version != _prevLoadVersion) return;   // 그 사이 날짜가 또 바뀜
+
+            HasPrevFile = prev != null;
+            if (prev == null)
+            {
+                PrevSourceText = "이전 날짜에 만든 공사일보가 없습니다. 처음 쓰는 날이면 '전일(대)'와 '전일누계(명)'에 " +
+                                 "지금까지의 누계를 직접 입력하세요. 이 값이 기준이 되어 다음 날부터는 자동으로 이어집니다.";
+                return;
+            }
+            if (error != null)
+            {
+                AppLog.Error($"전일 값 읽기 실패: {prev.Value.Path}", error);
+                PrevSourceText = $"{Path.GetFileName(prev.Value.Path)} 을(를) 읽지 못했습니다: {error.Message}";
+                return;
+            }
+
+            // 읽는 사이 줄을 더하거나 지웠을 수 있어 겹치는 줄까지만 옮긴다
+            for (int i = 0; i < Math.Min(Equipment.Count, input.Equipment.Count); i++)
+                Equipment[i].PrevDayCount = input.Equipment[i].PrevDayCount;
+            for (int i = 0; i < Math.Min(Personnel.Count, input.Personnel.Count); i++)
+                Personnel[i].PrevCumulativeCount = input.Personnel[i].PrevCumulativeCount;
+
+            PrevSourceText = $"전일 값은 {prev.Value.Date:MM/dd (ddd)} 공사일보의 누계(전일 + 금일)에서 가져왔습니다. " +
+                             "칸을 고치면 고친 값으로 만듭니다.";
+        }
         catch (Exception ex)
         {
-            PrevSourceText = $"{Path.GetFileName(prev.Value.Path)} 을(를) 읽지 못했습니다: {ex.Message}";
-            return;
+            AppLog.Error("전일 값 불러오기 실패", ex);
+            if (version == _prevLoadVersion) PrevSourceText = $"전일 값을 불러오지 못했습니다: {ex.Message}";
         }
-        for (int i = 0; i < Equipment.Count; i++) Equipment[i].PrevDayCount        = input.Equipment[i].PrevDayCount;
-        for (int i = 0; i < Personnel.Count; i++) Personnel[i].PrevCumulativeCount = input.Personnel[i].PrevCumulativeCount;
-
-        PrevSourceText = $"전일 값은 {prev.Value.Date:MM/dd (ddd)} 공사일보의 누계(전일 + 금일)에서 가져왔습니다. " +
-                         "칸을 고치면 고친 값으로 만듭니다.";
     }
 
     // ── 사진 슬롯 ────────────────────────────────────────────────────
@@ -764,36 +820,33 @@ public class MainViewModel : ViewModelBase
 
     // ── 사진 삽입 ────────────────────────────────────────────────────
 
-    private void InsertPhotos(
+    /// <summary>뒤 스레드에서 돈다 — 화면 값(PhotoSlots 등)은 건드리지 않고 넘겨받은 것만 쓴다.</summary>
+    private static void InsertPhotos(
+        List<PhotoJob> photos,
         HashSet<string> generatedDocIds,
+        DateTime date,
         AppConfig config,
         string baseDir,
         List<string> results)
     {
-        var filledSlots = PhotoSlots.Where(s => s.HasPhoto).ToList();
-        if (filledSlots.Count == 0) return;
-
-        foreach (var slot in filledSlots)
+        foreach (var slot in photos)
         {
             var docConfig = config.Documents.FirstOrDefault(d => d.Id == slot.DocumentId);
             if (docConfig == null) continue;
             if (!generatedDocIds.Contains(slot.DocumentId)) continue;
 
-            string outputFileName = GenericExcelWriter.ApplyDatePattern(
-                docConfig.OutputPattern, TargetDate);
-            string outputPath = Path.Combine(baseDir, config.OutputFolder, outputFileName);
+            string outputPath = GenericExcelWriter.BuildOutputPath(date, docConfig.OutputPattern, baseDir, config.OutputFolder);
             if (!File.Exists(outputPath)) continue;
 
             try
             {
-                byte[] imageBytes = PhotoService.ResizeToFill(
-                    slot.SelectedImagePath!, slot.TargetWidthPx, slot.TargetHeightPx);
-                ExcelPhotoWriter.ReplacePhoto(
-                    outputPath, slot.SheetName, slot.SlotIndex, imageBytes);
+                byte[] imageBytes = PhotoService.ResizeToFill(slot.ImagePath, slot.Width, slot.Height);
+                ExcelPhotoWriter.ReplacePhoto(outputPath, slot.SheetName, slot.SlotIndex, imageBytes);
                 results.Add($"사진대지 사진 넣음: {slot.Label} → {slot.SheetName}");
             }
             catch (Exception ex)
             {
+                AppLog.Error($"사진대지 사진 넣기 실패: {slot.Label} ({slot.ImagePath})", ex);
                 results.Add($"사진대지 사진 넣기 실패({slot.Label}): {ex.Message}");
             }
         }

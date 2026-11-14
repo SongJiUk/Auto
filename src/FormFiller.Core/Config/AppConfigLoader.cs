@@ -24,17 +24,43 @@ public static class AppConfigLoader
     /// exe 위치(AppDomain.CurrentDomain.BaseDirectory) 기준으로 config.json 을 읽는다.
     /// 파일이 없거나 파싱 실패 시 기본값을 반환한다.
     /// </summary>
+    // 마지막으로 읽은 config.json 내용. 파일 시각·크기가 같으면 디스크(구글 드라이브)에서 다시 읽지 않는다.
+    // 객체가 아니라 글자를 담아 두므로, 부를 때마다 새 객체를 돌려주는 동작은 그대로다.
+    private static readonly object CacheGate = new();
+    private static string?  _cachedJson;
+    private static DateTime _cachedWriteTime;
+    private static long     _cachedLength = -1;
+
+    private static string? ReadJsonCached(string configPath)
+    {
+        var fi = new FileInfo(configPath);
+        if (!fi.Exists) return null;
+        lock (CacheGate)
+        {
+            if (_cachedJson != null && fi.LastWriteTimeUtc == _cachedWriteTime && fi.Length == _cachedLength)
+                return _cachedJson;
+            string json = File.ReadAllText(configPath, System.Text.Encoding.UTF8);
+            _cachedJson      = json;
+            _cachedWriteTime = fi.LastWriteTimeUtc;
+            _cachedLength    = fi.Length;
+            return json;
+        }
+    }
+
     public static AppConfig Load()
     {
         string configPath = Path.Combine(
             AppDomain.CurrentDomain.BaseDirectory,
             "config.json");
 
-        if (File.Exists(configPath))
+        string? json = null;
+        try { json = ReadJsonCached(configPath); }
+        catch (IOException ex) { AppLog.Error("config.json 을 읽지 못했습니다", ex); }
+
+        if (json != null)
         {
             try
             {
-                string json   = File.ReadAllText(configPath, System.Text.Encoding.UTF8);
                 var    config = JsonSerializer.Deserialize<AppConfig>(json, ReadOptions);
                 if (config != null)
                     return config;
@@ -42,7 +68,7 @@ public static class AppConfigLoader
             catch (JsonException ex)
             {
                 // JSON 파싱 실패 시 기본값으로 폴백 (운영 중 설정 오타 대비)
-                System.Diagnostics.Debug.WriteLine($"[AppConfigLoader] JSON 파싱 실패: {ex.Message}");
+                AppLog.Error("config.json 내용이 잘못되어 기본 설정을 씁니다", ex);
             }
         }
 
@@ -60,7 +86,11 @@ public static class AppConfigLoader
             "config.json");
 
         string json = JsonSerializer.Serialize(config, WriteOptions);
-        File.WriteAllText(path, json, System.Text.Encoding.UTF8);
+        lock (CacheGate)
+        {
+            File.WriteAllText(path, json, System.Text.Encoding.UTF8);
+            _cachedJson = null;   // 다음 Load 때 새로 읽어 시각·크기를 다시 기억한다
+        }
     }
 
     // ── 서식 경로 (두 PC 에서 같은 설정을 쓰기 위해) ───────────────────

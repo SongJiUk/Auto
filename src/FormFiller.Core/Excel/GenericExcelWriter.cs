@@ -102,11 +102,20 @@ public static class GenericExcelWriter
     public static (string Path, DateTime Date)? FindPreviousFile(
         DateTime date, string outputPattern, string baseDir, string outputFolder, int maxDays = 60)
     {
+        // 폴더 목록을 한 번만 읽어 두고 비교한다 (드라이브 폴더에서 파일마다 확인하면 느리다)
+        string dir = Path.GetFullPath(Path.Combine(baseDir, outputFolder));
+        if (!Directory.Exists(dir)) return null;
+        var names = new HashSet<string>(
+            Directory.EnumerateFiles(dir).Select(f => Path.GetFileName(f)), StringComparer.OrdinalIgnoreCase);
+
         for (int i = 1; i <= maxDays; i++)
         {
             DateTime d    = date.Date.AddDays(-i);
-            string   path = BuildOutputPath(d, outputPattern, baseDir, outputFolder);
-            if (File.Exists(path)) return (path, d);
+            string   path = Path.GetFullPath(BuildOutputPath(d, outputPattern, baseDir, outputFolder));
+            bool exists = string.Equals(Path.GetDirectoryName(path), dir, StringComparison.OrdinalIgnoreCase)
+                ? names.Contains(Path.GetFileName(path))
+                : File.Exists(path);   // 파일 이름에 하위 폴더가 들어간 패턴
+            if (exists) return (path, d);
         }
         return null;
     }
@@ -145,6 +154,11 @@ public static class GenericExcelWriter
                 $"템플릿 파일을 찾을 수 없습니다.\n경로: {templatePath}");
 
         string outputPath = BuildOutputPath(input.Date, docConfig.OutputPattern, baseDir, outputFolder);
+
+        // 같은 날짜 파일이 이미 있으면 덮어쓰기 전에 "백업" 폴더에 남긴다
+        string? backup = OutputBackup.BackupIfExists(outputPath);
+        if (backup != null)
+            notes?.Add($"{docConfig.Name}: 앞의 파일은 백업했습니다 → {OutputBackup.FolderName}\\{Path.GetFileName(backup)}");
 
         // 한글(hwpx) 서식은 별도 엔진으로 처리
         if (HwpxWriter.IsHwpx(templatePath))

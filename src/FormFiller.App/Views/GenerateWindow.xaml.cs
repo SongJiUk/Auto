@@ -10,6 +10,9 @@ public partial class GenerateWindow : Window
     {
         InitializeComponent();
         DataContext = vm;
+
+        // 만드는 중에 창을 닫으면 결과를 볼 수 없으니 끝날 때까지 막는다
+        Closing += (_, e) => { if (vm.IsRunning) e.Cancel = true; };
     }
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
