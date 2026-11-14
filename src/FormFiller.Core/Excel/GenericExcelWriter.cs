@@ -425,7 +425,7 @@ public static class GenericExcelWriter
     /// OutputPattern 의 {yy}, {MM}, {dd} 를 날짜로 치환해 출력 경로를 반환한다.
     /// 예) "공사일보_출력일보_{yy}.{MM}.{dd}.xlsx" → ".../output/공사일보_출력일보_26.11.05.xlsx"
     /// </summary>
-    private static string BuildOutputPath(DateTime date, string outputPattern,
+    public static string BuildOutputPath(DateTime date, string outputPattern,
                                           string baseDir, string outputFolder)
     {
         string fileName = ApplyDatePattern(outputPattern, date);

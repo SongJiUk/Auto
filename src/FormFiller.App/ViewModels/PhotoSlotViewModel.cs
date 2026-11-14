@@ -39,6 +39,10 @@ public class PhotoSlotViewModel : ViewModelBase
 
     // ── 상태 프로퍼티 ───────────────────────────────────────────────
 
+    private bool _isVisible = true;
+    /// <summary>"오늘 생성할 문서"에서 이 문서를 체크했을 때만 보인다</summary>
+    public bool IsVisible { get => _isVisible; set => SetField(ref _isVisible, value); }
+
     private string? _selectedImagePath;
 
     /// <summary>

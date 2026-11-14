@@ -26,6 +26,14 @@ public class DocInputCardViewModel : ViewModelBase
 
     public bool HasPhotos => Config.Fields.Any(f => f.Type == FieldTypes.Photo);
 
+    private bool _isVisible = true;
+    /// <summary>"오늘 생성할 문서"에서 이 문서를 체크했을 때만 보인다</summary>
+    public bool IsVisible { get => _isVisible; set => SetField(ref _isVisible, value); }
+
+    /// <summary>모든 시트의 매일 입력 항목</summary>
+    public IEnumerable<(string Sheet, FieldInputViewModel Item)> AllItems =>
+        Sheets.SelectMany(s => s.Items.Select(i => (s.Header, i)));
+
     /// <summary>사진을 가져올 폴더 (비어 있으면 처음 불러올 때 고른다)</summary>
     public string PhotoFolderText => string.IsNullOrEmpty(Config.PhotoFolder) ? "사진 폴더 미지정" : Config.PhotoFolder;
 

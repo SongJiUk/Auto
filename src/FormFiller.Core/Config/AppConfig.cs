@@ -35,6 +35,9 @@ public class AppConfig
     /// 비어 있으면 AI 기능 비활성화. 절대 git에 올리지 말 것.
     /// </summary>
     public string ClaudeApiKey { get; set; } = "";
+
+    /// <summary>파일 생성이 끝나면 만든 파일을 바로 Excel(또는 한글)로 열지 여부</summary>
+    public bool OpenAfterGenerate { get; set; } = true;
 }
 
 /// <summary>

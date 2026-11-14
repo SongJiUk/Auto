@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.IO;
 using System.Windows;
 using System.Windows.Input;
@@ -77,8 +78,159 @@ public class MainViewModel : ViewModelBase
         DocInputCards.Clear();
         foreach (var doc in AppConfigLoader.Load().Documents
                      .Where(d => d.Fields.Any(f => FieldTypes.IsDailyInput(f.Type))))
-            DocInputCards.Add(new DocInputCardViewModel(doc, () => TargetDate));
+        {
+            var card = new DocInputCardViewModel(doc, () => TargetDate);
+            foreach (var (_, item) in card.AllItems) Track(item);
+            DocInputCards.Add(card);
+        }
         OnPropertyChanged(nameof(HasDocInputs));
+        RefreshUsage();
+    }
+
+    // ── 단계 (왼쪽 목록) ─────────────────────────────────────────────
+    // 오른쪽에는 고른 단계의 입력만 보여 준다. 오늘 만들 문서에 필요 없는 단계는 숨긴다.
+
+    public ObservableCollection<StepItem> Steps { get; } =
+    [
+        new("docs",   "문서 · 기본 정보"),
+        new("work",   "작업사항"),
+        new("crew",   "장비 · 인원"),
+        new("photos", "사진 · 측정값"),
+    ];
+
+    private StepItem Step(string key) => Steps.First(s => s.Key == key);
+
+    private StepItem? _currentStep;
+    public StepItem? CurrentStep
+    {
+        get => _currentStep;
+        set
+        {
+            // ListBox 가 목록을 다시 그릴 때 잠깐 null 을 넣는 경우가 있어 무시한다
+            if (value == null || !SetField(ref _currentStep, value)) return;
+            OnPropertyChanged(nameof(ShowDocsStep));
+            OnPropertyChanged(nameof(ShowWorkStep));
+            OnPropertyChanged(nameof(ShowCrewStep));
+            OnPropertyChanged(nameof(ShowPhotosStep));
+            OnPropertyChanged(nameof(HasPrevStep));
+            OnPropertyChanged(nameof(HasNextStep));
+        }
+    }
+
+    public bool ShowDocsStep   => CurrentStep?.Key == "docs";
+    public bool ShowWorkStep   => CurrentStep?.Key == "work";
+    public bool ShowCrewStep   => CurrentStep?.Key == "crew";
+    public bool ShowPhotosStep => CurrentStep?.Key == "photos";
+
+    private int CurrentStepIndex => CurrentStep == null ? -1 : VisibleSteps.IndexOf(CurrentStep);
+    private List<StepItem> VisibleSteps => Steps.Where(s => s.IsVisible).ToList();
+    public bool HasPrevStep => CurrentStepIndex > 0;
+    public bool HasNextStep => CurrentStepIndex >= 0 && CurrentStepIndex < VisibleSteps.Count - 1;
+
+    public ICommand PrevStepCommand { get; }
+    public ICommand NextStepCommand { get; }
+
+    private void MoveStep(int delta)
+    {
+        var list = VisibleSteps;
+        int i = Math.Clamp(CurrentStepIndex + delta, 0, list.Count - 1);
+        CurrentStep = list[i];
+    }
+
+    // ── 오늘 만들 문서에 필요한 입력 ─────────────────────────────────
+    // 체크한 문서의 필드 종류를 보고, 쓰지 않는 입력 칸은 숨긴다.
+
+    private bool _usesWork, _usesEquipment, _usesPersonnel, _usesSujangjae;
+    private bool _hasVisibleDocInputs, _hasVisiblePhotoSlots, _noDocChecked;
+
+    public bool UsesWork             => _usesWork;
+    public bool UsesEquipment        => _usesEquipment;
+    public bool UsesPersonnel        => _usesPersonnel;
+    public bool UsesSujangjae        => _usesSujangjae;
+    public bool HasVisibleDocInputs  => _hasVisibleDocInputs;
+    public bool HasVisiblePhotoSlots => _hasVisiblePhotoSlots;
+    public bool NoDocChecked         => _noDocChecked;
+
+    private static bool Has(DocumentConfig d, params string[] types) => d.Fields.Any(f => types.Contains(f.Type));
+
+    private static bool UsesSujangjaeFor(DocumentConfig d) =>
+        Has(d, FieldTypes.TbmPersonnel) || (d.IncludesSujangjae && Has(d, FieldTypes.PersonnelTable));
+
+    /// <summary>문서 체크가 바뀌면: 보일 입력 칸과 단계를 다시 정한다.</summary>
+    private void RefreshUsage()
+    {
+        var docs = DocumentDueList.Where(d => d.IsChecked).Select(d => d.Config).ToList();
+        var ids  = docs.Select(d => d.Id).ToHashSet();
+
+        SetField(ref _usesWork,      docs.Any(d => Has(d, FieldTypes.Multiline)), nameof(UsesWork));
+        SetField(ref _usesEquipment, docs.Any(d => Has(d, FieldTypes.EquipmentTable, FieldTypes.ActiveEquipmentNames)), nameof(UsesEquipment));
+        SetField(ref _usesPersonnel, docs.Any(d => Has(d, FieldTypes.PersonnelTable, FieldTypes.TbmPersonnel)), nameof(UsesPersonnel));
+        SetField(ref _usesSujangjae, docs.Any(UsesSujangjaeFor), nameof(UsesSujangjae));
+
+        foreach (var card in DocInputCards) card.IsVisible = ids.Contains(card.Config.Id);
+        foreach (var slot in PhotoSlots)    slot.IsVisible = ids.Contains(slot.DocumentId);
+        SetField(ref _hasVisibleDocInputs,  DocInputCards.Any(c => c.IsVisible), nameof(HasVisibleDocInputs));
+        SetField(ref _hasVisiblePhotoSlots, PhotoSlots.Any(s => s.IsVisible),    nameof(HasVisiblePhotoSlots));
+        SetField(ref _noDocChecked,         docs.Count == 0,                     nameof(NoDocChecked));
+
+        Step("work").IsVisible   = _usesWork;
+        Step("crew").IsVisible   = _usesEquipment || _usesPersonnel || _usesSujangjae;
+        Step("photos").IsVisible = _hasVisibleDocInputs || _hasVisiblePhotoSlots;
+
+        int n = 1;
+        foreach (var s in Steps.Where(s => s.IsVisible)) s.Number = n++;
+
+        if (CurrentStep == null || !CurrentStep.IsVisible) CurrentStep = Steps[0];
+        OnPropertyChanged(nameof(HasPrevStep));
+        OnPropertyChanged(nameof(HasNextStep));
+        RefreshSteps();
+    }
+
+    /// <summary>단계마다 ✔(다 했음)와 요약 글자를 다시 계산한다. 입력이 바뀔 때마다 부른다.</summary>
+    private void RefreshSteps()
+    {
+        int docCount = DocumentDueList.Count(d => d.IsChecked);
+        var docs = Step("docs");
+        docs.IsDone  = docCount > 0;
+        docs.Summary = docCount > 0 ? $"{TargetDate:MM/dd (ddd)} · 문서 {docCount}개" : "만들 문서를 고르세요";
+
+        int am = CountFilled(TodayMorningItems), pm = CountFilled(TodayAfternoonItems), tm = CountFilled(TomorrowWorkItems);
+        var work = Step("work");
+        work.IsDone  = am + pm > 0;
+        work.Summary = $"오전 {am} · 오후 {pm} · 명일 {tm}";
+
+        var crew = Step("crew");
+        crew.IsDone  = (!_usesEquipment || TotalTodayEquipment > 0)
+                    && (!_usesPersonnel || TotalTodayPersonnelWithSujangjae > 0);
+        crew.Summary = $"장비 {TotalTodayEquipment}대 · 인원 {TotalTodayPersonnelWithSujangjae}명";
+
+        var items  = DocInputCards.Where(c => c.IsVisible).SelectMany(c => c.AllItems).Select(x => x.Item).ToList();
+        var slots  = PhotoSlots.Where(s => s.IsVisible).ToList();
+        int total  = items.Count(i => i.IsPhoto) + slots.Count;
+        int filled = items.Count(i => i.IsPhoto && i.HasPhoto) + slots.Count(s => s.HasPhoto);
+        int noVal  = items.Count(i => i.HasValue && i.Value.Trim().Length == 0);
+        var photos = Step("photos");
+        photos.IsDone  = filled == total && noVal == 0;
+        photos.Summary = (total > 0 ? $"사진 {filled}/{total}" : "")
+                       + (noVal > 0 ? (total > 0 ? " · " : "") + $"값 {noVal}칸 남음" : "");
+    }
+
+    private static int CountFilled(IEnumerable<WorkItemViewModel> items) => items.Count(i => !IsBlankWork(i.Text));
+
+    /// <summary>"- " 처럼 내용 없는 작업 줄인지</summary>
+    private static bool IsBlankWork(string text) => text.Trim().TrimStart('-').Trim().Length == 0;
+
+    /// <summary>항목 값이 바뀌면 단계 ✔ 를 다시 계산하도록 연결한다.</summary>
+    private void Track(INotifyPropertyChanged item) => item.PropertyChanged += (_, _) => RefreshSteps();
+
+    private void TrackCollection<T>(ObservableCollection<T> list) where T : INotifyPropertyChanged
+    {
+        list.CollectionChanged += (_, e) =>
+        {
+            if (e.NewItems != null)
+                foreach (T item in e.NewItems) Track(item);
+            RefreshSteps();
+        };
     }
 
     // ── 합계 (읽기 전용) ──────────────────────────────────────────────
@@ -125,6 +277,17 @@ public class MainViewModel : ViewModelBase
         AddSujangjaeCommand      = new RelayCommand(_ => AddPersonnelRow(SujangjaePersonnel));
 
         OpenAiAssistantCommand   = new RelayCommand(_ => OpenAiAssistant());
+
+        PrevStepCommand          = new RelayCommand(_ => MoveStep(-1), _ => HasPrevStep);
+        NextStepCommand          = new RelayCommand(_ => MoveStep(+1), _ => HasNextStep);
+
+        // 입력이 바뀌면 왼쪽 단계의 ✔ 와 요약을 갱신 (항목을 넣기 전에 연결해 둔다)
+        TrackCollection(TodayMorningItems);
+        TrackCollection(TodayAfternoonItems);
+        TrackCollection(TomorrowWorkItems);
+        TrackCollection(Equipment);
+        TrackCollection(Personnel);
+        TrackCollection(SujangjaePersonnel);
 
         InitDefaultEquipment();
         InitDefaultPersonnel();
@@ -265,65 +428,173 @@ public class MainViewModel : ViewModelBase
         var    config  = AppConfigLoader.Load();
         string baseDir = AppDomain.CurrentDomain.BaseDirectory;
         foreach (var doc in config.Documents)
-            DocumentDueList.Add(new DocumentDueItem(doc, TargetDate.Date, config.OutputFolder, baseDir));
+        {
+            var item = new DocumentDueItem(doc, TargetDate.Date, config.OutputFolder, baseDir);
+            item.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(DocumentDueItem.IsChecked)) RefreshUsage();
+            };
+            DocumentDueList.Add(item);
+        }
+        RefreshUsage();
     }
 
     // ── 파일 생성 ────────────────────────────────────────────────────
+    // [파일 생성] → 확인 창(빠진 칸·문제) → [생성] → 같은 창에 결과와 [열기] 버튼
 
     private void OnGenerate()
     {
+        var    config  = AppConfigLoader.Load();
+        string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+
+        var checkedDocs = DocumentDueList.Where(d => d.IsChecked).ToList();
+        if (checkedDocs.Count == 0)
+        {
+            MessageBox.Show("만들 문서를 하나 이상 체크하세요.", "알림",
+                            MessageBoxButton.OK, MessageBoxImage.Information);
+            CurrentStep = Step("docs");
+            return;
+        }
+
+        var checks = checkedDocs.Select(d => BuildCheck(d.Config, config, baseDir)).ToList();
+
+        // 저장 파일 이름이 같은 문서끼리는 나중 것이 앞의 것을 덮어쓴다
+        foreach (var group in checks.GroupBy(c => c.OutputPath, StringComparer.OrdinalIgnoreCase).Where(g => g.Count() > 1))
+            foreach (var c in group)
+                c.Warn($"다른 문서({string.Join(", ", group.Where(o => o != c).Select(o => o.Name))})와 저장 파일 이름이 같아 서로 덮어씁니다. 설정에서 파일 이름을 바꿔 주세요.");
+        var vm = new GenerateViewModel(TargetDate, checks, Path.Combine(baseDir, config.OutputFolder),
+                                       targets => RunGenerate(targets, config, baseDir));
+        new GenerateWindow(vm) { Owner = Application.Current.MainWindow }.ShowDialog();
+    }
+
+    /// <summary>
+    /// 문서 하나를 만들기 전에 확인할 것을 모은다.
+    /// Error(빨강) = 만들 수 없음 → 그 문서는 건너뜀. Warn(주황) = 만들 수는 있지만 확인 필요.
+    /// </summary>
+    private DocCheckItem BuildCheck(DocumentConfig doc, AppConfig config, string baseDir)
+    {
+        var c = new DocCheckItem(doc, GenericExcelWriter.BuildOutputPath(
+                                          TargetDate, doc.OutputPattern, baseDir, config.OutputFolder));
+
+        // 서식 파일
+        if (string.IsNullOrWhiteSpace(doc.TemplateFile) || !File.Exists(Path.Combine(baseDir, doc.TemplateFile)))
+            c.Error("서식 파일이 없습니다. 설정에서 서식 파일을 다시 골라 주세요.");
+
+        // 같은 이름 파일
+        if (File.Exists(c.OutputPath))
+        {
+            if (IsFileLocked(c.OutputPath))
+                c.Error("같은 날짜 파일이 Excel에서 열려 있어 저장할 수 없습니다. Excel에서 닫고 다시 누르세요.");
+            else
+                c.Warn("이 날짜 파일이 이미 있습니다. 새로 만들면 덮어씁니다.");
+        }
+
+        // 작업사항
+        if (Has(doc, FieldTypes.Multiline))
+        {
+            if (CountFilled(TodayMorningItems) + CountFilled(TodayAfternoonItems) == 0)
+                c.Warn("금일 작업사항이 비어 있습니다.");
+            if (CountFilled(TomorrowWorkItems) == 0 && doc.Fields.Any(f => f.Id == "tomorrow_work"))
+                c.Warn("명일 작업사항이 비어 있습니다.");
+        }
+
+        // 장비
+        if (Has(doc, FieldTypes.EquipmentTable, FieldTypes.ActiveEquipmentNames))
+        {
+            if (TotalTodayEquipment == 0)
+                c.Warn("장비 금일 대수가 모두 0입니다.");
+            if (Equipment.Any(e => e.TodayCount > 0 && string.IsNullOrWhiteSpace(e.Name)))
+                c.Warn("이름 없는 장비 줄에 대수가 들어 있습니다.");
+        }
+
+        // 인원
+        if (Has(doc, FieldTypes.PersonnelTable, FieldTypes.TbmPersonnel))
+        {
+            int people = UsesSujangjaeFor(doc) ? TotalTodayPersonnelWithSujangjae : TotalTodayPersonnel;
+            if (people == 0) c.Warn("금일 인원이 0명입니다.");
+        }
+
+        // 전일 값: 공사일보는 생성할 때 어제 파일에서 다시 읽는다. 파일이 없으면 화면 값을 그대로 쓴다.
+        if (doc.Id == "daily_report" && Has(doc, FieldTypes.EquipmentTable, FieldTypes.PersonnelTable))
+        {
+            string prev = GenericExcelWriter.BuildOutputPath(
+                TargetDate.AddDays(-1), doc.OutputPattern, baseDir, config.OutputFolder);
+            if (!File.Exists(prev))
+                c.Warn($"어제 파일({Path.GetFileName(prev)})이 없어 화면의 전일 값을 그대로 씁니다. 전일·누계를 확인하세요.");
+        }
+
+        // 사진·측정값 (시트마다 한 줄로 묶어서)
+        var card = DocInputCards.FirstOrDefault(x => x.Config.Id == doc.Id);
+        if (card != null)
+        {
+            foreach (var sheet in card.Sheets)
+            {
+                var noPhoto = sheet.Items.Where(i => i.IsPhoto && !i.HasPhoto).Select(i => i.Label).ToList();
+                var noValue = sheet.Items.Where(i => i.HasValue && i.Value.Trim().Length == 0).Select(i => i.Label).ToList();
+                string where = card.Sheets.Count > 1 ? $"[{sheet.Header}] " : "";
+                if (noPhoto.Count > 0)
+                    c.Warn($"{where}사진 없음 {noPhoto.Count}칸 ({ShortList(noPhoto)}) → 서식 사진 그대로");
+                if (noValue.Count > 0)
+                    c.Warn($"{where}값 없음 {noValue.Count}칸 ({ShortList(noValue)}) → 서식 값 그대로");
+            }
+        }
+
+        int emptySlots = PhotoSlots.Count(s => s.DocumentId == doc.Id && !s.HasPhoto);
+        if (emptySlots > 0)
+            c.Warn($"사진대지 빈 칸 {emptySlots}개 → 서식 사진 그대로");
+
+        return c;
+    }
+
+    private static string ShortList(List<string> labels) =>
+        string.Join(", ", labels.Take(3)) + (labels.Count > 3 ? " …" : "");
+
+    /// <summary>다른 프로그램(Excel)이 파일을 열고 있어 덮어쓸 수 없는지</summary>
+    private static bool IsFileLocked(string path)
+    {
         try
         {
-            var    config  = AppConfigLoader.Load();
-            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
-
-            var checkedDocs = DocumentDueList.Where(d => d.IsChecked).ToList();
-            if (checkedDocs.Count == 0)
-            {
-                MessageBox.Show("생성할 문서를 선택하세요.", "알림",
-                                MessageBoxButton.OK, MessageBoxImage.Information);
-                return;
-            }
-
-            var input = BuildDailyInput();
-
-            var dailyDoc = config.Documents.FirstOrDefault(d => d.Id == "daily_report");
-            if (dailyDoc != null)
-            {
-                DateTime yesterday    = TargetDate.AddDays(-1);
-                string   prevFileName = GenericExcelWriter.ApplyDatePattern(
-                                            dailyDoc.OutputPattern, yesterday);
-                string   prevPath     = Path.Combine(baseDir, config.OutputFolder, prevFileName);
-                GenericExcelWriter.LoadPreviousDay(prevPath, input, dailyDoc);
-            }
-
-            foreach (var card in DocInputCards)
-                card.FillInput(input);
-
-            var results = new List<string>();
-            var notes   = new List<string>();
-            foreach (var dueItem in checkedDocs)
-            {
-                string outputPath = GenericExcelWriter.Generate(
-                    input, dueItem.Config, baseDir, config.OutputFolder,
-                    PhotoService.ResizeToCover, notes);
-                results.Add($"{dueItem.Name}: {Path.GetFileName(outputPath)}");
-            }
-
-            InsertPhotos(checkedDocs, config, baseDir, results);
-
-            if (notes.Count > 0)
-                results.Add("\n참고:\n" + string.Join("\n", notes.Take(15))
-                            + (notes.Count > 15 ? $"\n… 외 {notes.Count - 15}건" : ""));
-
-            string summary = string.Join("\n", results.Prepend("파일 생성 완료!\n"));
-            MessageBox.Show(summary, "완료", MessageBoxButton.OK, MessageBoxImage.Information);
+            using var fs = File.Open(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            return false;
         }
-        catch (Exception ex)
+        catch (IOException)                  { return true; }
+        catch (UnauthorizedAccessException)  { return true; }
+    }
+
+    /// <summary>확인 창에서 [생성] 을 누르면 호출된다. 문서마다 따로 만들어, 하나가 실패해도 나머지는 만든다.</summary>
+    private List<string> RunGenerate(IReadOnlyList<DocCheckItem> targets, AppConfig config, string baseDir)
+    {
+        var notes = new List<string>();
+        var input = BuildDailyInput();
+
+        var dailyDoc = config.Documents.FirstOrDefault(d => d.Id == "daily_report");
+        if (dailyDoc != null)
         {
-            MessageBox.Show($"파일 생성 중 오류가 발생했습니다.\n\n{ex.Message}", "오류",
-                            MessageBoxButton.OK, MessageBoxImage.Error);
+            string prevPath = GenericExcelWriter.BuildOutputPath(
+                TargetDate.AddDays(-1), dailyDoc.OutputPattern, baseDir, config.OutputFolder);
+            GenericExcelWriter.LoadPreviousDay(prevPath, input, dailyDoc);
         }
+
+        foreach (var card in DocInputCards)
+            card.FillInput(input);
+
+        foreach (var t in targets)
+        {
+            try
+            {
+                GenericExcelWriter.Generate(input, t.Config, baseDir, config.OutputFolder,
+                                            PhotoService.ResizeToCover, notes);
+                t.SetDone();
+            }
+            catch (Exception ex)
+            {
+                t.SetFailed(ex.Message);
+            }
+        }
+
+        var doneIds = targets.Where(t => t.IsOk).Select(t => t.Config.Id).ToHashSet();
+        InsertPhotos(doneIds, config, baseDir, notes);
+        return notes;
     }
 
     private DailyInput BuildDailyInput() => new()
@@ -524,16 +795,18 @@ public class MainViewModel : ViewModelBase
                 var slot = new PhotoSlotViewModel(
                     doc.Id, doc.PhotoSheet, info.SlotIndex,
                     info.WidthPx, info.HeightPx, savedLabel);
+                Track(slot);
                 PhotoSlots.Add(slot);
             }
         }
         OnPropertyChanged(nameof(HasPhotoSlots));
+        RefreshUsage();
     }
 
     // ── 사진 삽입 ────────────────────────────────────────────────────
 
     private void InsertPhotos(
-        List<DocumentDueItem> checkedDocs,
+        HashSet<string> generatedDocIds,
         AppConfig config,
         string baseDir,
         List<string> results)
@@ -545,8 +818,7 @@ public class MainViewModel : ViewModelBase
         {
             var docConfig = config.Documents.FirstOrDefault(d => d.Id == slot.DocumentId);
             if (docConfig == null) continue;
-            var dueItem = checkedDocs.FirstOrDefault(d => d.Config.Id == slot.DocumentId);
-            if (dueItem == null) continue;
+            if (!generatedDocIds.Contains(slot.DocumentId)) continue;
 
             string outputFileName = GenericExcelWriter.ApplyDatePattern(
                 docConfig.OutputPattern, TargetDate);
@@ -559,11 +831,11 @@ public class MainViewModel : ViewModelBase
                     slot.SelectedImagePath!, slot.TargetWidthPx, slot.TargetHeightPx);
                 ExcelPhotoWriter.ReplacePhoto(
                     outputPath, slot.SheetName, slot.SlotIndex, imageBytes);
-                results.Add($"  └ 사진 삽입: {slot.Label} → {slot.SheetName}");
+                results.Add($"사진대지 사진 넣음: {slot.Label} → {slot.SheetName}");
             }
             catch (Exception ex)
             {
-                results.Add($"  └ 사진 삽입 실패({slot.Label}): {ex.Message}");
+                results.Add($"사진대지 사진 넣기 실패({slot.Label}): {ex.Message}");
             }
         }
     }

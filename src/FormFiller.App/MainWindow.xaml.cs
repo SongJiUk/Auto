@@ -15,6 +15,13 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+
+        // 단계를 바꾸면 오른쪽 화면을 맨 위부터 보여 준다
+        if (DataContext is MainViewModel vm)
+            vm.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(MainViewModel.CurrentStep)) BodyScroll.ScrollToTop();
+            };
     }
 
     /// <summary>설정 창 열기</summary>
