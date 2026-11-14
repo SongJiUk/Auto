@@ -25,7 +25,10 @@ public class MainViewModel : ViewModelBase
         set
         {
             if (SetField(ref _targetDate, value))
+            {
                 LoadDocumentDueList();
+                LoadPreviousData();   // 날짜가 바뀌면 그 날짜 기준 이전 파일에서 전일 값을 다시 읽는다
+            }
         }
     }
 
@@ -298,7 +301,7 @@ public class MainViewModel : ViewModelBase
         SujangjaePersonnel.CollectionChanged += (_, _) => RefreshPersonnelSums();
 
         LoadYesterdayWorkItems();
-        LoadYesterdayData();
+        LoadPreviousData();
         LoadDocumentDueList();
         LoadPhotoSlots();
         LoadDocInputCards();
@@ -514,14 +517,10 @@ public class MainViewModel : ViewModelBase
             if (people == 0) c.Warn("금일 인원이 0명입니다.");
         }
 
-        // 전일 값: 공사일보는 생성할 때 어제 파일에서 다시 읽는다. 파일이 없으면 화면 값을 그대로 쓴다.
-        if (doc.Id == "daily_report" && Has(doc, FieldTypes.EquipmentTable, FieldTypes.PersonnelTable))
-        {
-            string prev = GenericExcelWriter.BuildOutputPath(
-                TargetDate.AddDays(-1), doc.OutputPattern, baseDir, config.OutputFolder);
-            if (!File.Exists(prev))
-                c.Warn($"어제 파일({Path.GetFileName(prev)})이 없어 화면의 전일 값을 그대로 씁니다. 전일·누계를 확인하세요.");
-        }
+        // 전일 값: 이전 파일이 없으면 화면에 입력한 값이 기준이 된다
+        if (doc.Id == "daily_report" && Has(doc, FieldTypes.EquipmentTable, FieldTypes.PersonnelTable)
+            && FindPreviousDailyReport(config, doc) == null)
+            c.Warn("이전 날짜 공사일보가 없어 화면의 전일 값을 기준으로 씁니다. 첫날이면 전일·누계가 맞는지 확인하세요.");
 
         // 사진·측정값 (시트마다 한 줄로 묶어서)
         var card = DocInputCards.FirstOrDefault(x => x.Config.Id == doc.Id);
@@ -565,15 +564,9 @@ public class MainViewModel : ViewModelBase
     private List<string> RunGenerate(IReadOnlyList<DocCheckItem> targets, AppConfig config, string baseDir)
     {
         var notes = new List<string>();
+        // 전일 값은 날짜를 고를 때 이미 이전 파일에서 읽어 화면에 넣어 두었다.
+        // 사용자가 화면에서 고친 값을 존중하려고 여기서는 다시 읽지 않는다.
         var input = BuildDailyInput();
-
-        var dailyDoc = config.Documents.FirstOrDefault(d => d.Id == "daily_report");
-        if (dailyDoc != null)
-        {
-            string prevPath = GenericExcelWriter.BuildOutputPath(
-                TargetDate.AddDays(-1), dailyDoc.OutputPattern, baseDir, config.OutputFolder);
-            GenericExcelWriter.LoadPreviousDay(prevPath, input, dailyDoc);
-        }
 
         foreach (var card in DocInputCards)
             card.FillInput(input);
@@ -633,12 +626,9 @@ public class MainViewModel : ViewModelBase
         var dailyDoc = config.Documents.FirstOrDefault(d => d.Id == "daily_report");
         if (dailyDoc == null) { InitDefaultItems(); return; }
 
-        DateTime yesterday = DateTime.Today.AddDays(-1);
-        string   fileName  = GenericExcelWriter.ApplyDatePattern(dailyDoc.OutputPattern, yesterday);
-        string   filePath  = Path.Combine(
-            AppDomain.CurrentDomain.BaseDirectory, config.OutputFolder, fileName);
-
-        if (!File.Exists(filePath)) { InitDefaultItems(); return; }
+        var prev = FindPreviousDailyReport(config, dailyDoc);
+        if (prev == null) { InitDefaultItems(); return; }
+        string filePath = prev.Value.Path;
 
         try
         {
@@ -694,82 +684,51 @@ public class MainViewModel : ViewModelBase
     private static void AddWorkItem(ObservableCollection<WorkItemViewModel> items)
         => items.Add(new WorkItemViewModel("- ", item => items.Remove(item)));
 
-    // ── 어제 누계 로드 ────────────────────────────────────────────────
+    // ── 전일 누계 불러오기 ────────────────────────────────────────────
+    // 고른 날짜보다 앞선 가장 최근 공사일보(주말·쉬는 날 건너뜀)에서 누계를 읽어 "전일" 칸에 넣는다.
+    // 이전 파일이 없으면(처음 쓰는 날) 화면에 직접 입력한 값이 기준이 된다.
 
-    private void LoadYesterdayData()
+    private string _prevSourceText = "";
+    /// <summary>장비·인원 단계 위에 보여 줄 "전일 값을 어디서 가져왔는지" 안내</summary>
+    public string PrevSourceText { get => _prevSourceText; private set => SetField(ref _prevSourceText, value); }
+
+    private bool _hasPrevFile;
+    public bool HasPrevFile { get => _hasPrevFile; private set => SetField(ref _hasPrevFile, value); }
+
+    /// <summary>날짜 기준 이전 공사일보 파일 (없으면 null)</summary>
+    private (string Path, DateTime Date)? FindPreviousDailyReport(AppConfig config, DocumentConfig dailyDoc) =>
+        GenericExcelWriter.FindPreviousFile(TargetDate, dailyDoc.OutputPattern,
+                                            AppDomain.CurrentDomain.BaseDirectory, config.OutputFolder);
+
+    private void LoadPreviousData()
     {
         var config   = AppConfigLoader.Load();
         var dailyDoc = config.Documents.FirstOrDefault(d => d.Id == "daily_report");
-        if (dailyDoc == null) return;
+        if (dailyDoc == null) { PrevSourceText = ""; HasPrevFile = false; return; }
 
-        DateTime yesterday = DateTime.Today.AddDays(-1);
-        string   fileName  = GenericExcelWriter.ApplyDatePattern(dailyDoc.OutputPattern, yesterday);
-        string   filePath  = Path.Combine(
-                                 AppDomain.CurrentDomain.BaseDirectory,
-                                 config.OutputFolder, fileName);
-        if (!File.Exists(filePath)) return;
-
-        try
+        var prev = FindPreviousDailyReport(config, dailyDoc);
+        HasPrevFile = prev != null;
+        if (prev == null)
         {
-            using var doc    = DocumentFormat.OpenXml.Packaging.SpreadsheetDocument.Open(
-                                   filePath, isEditable: false);
-            var       wbPart = doc.WorkbookPart!;
-            var       wsPart = CellHelper.FindWorksheetPart(wbPart, dailyDoc.SheetName);
-            if (wsPart == null) return;
-
-            var eqField = dailyDoc.Fields.FirstOrDefault(f => f.Type == FormFiller.Core.Config.FieldTypes.EquipmentTable);
-            var pnField = dailyDoc.Fields.FirstOrDefault(f => f.Type == FormFiller.Core.Config.FieldTypes.PersonnelTable);
-
-            if (eqField != null && !string.IsNullOrEmpty(eqField.NameCol)
-                                && !string.IsNullOrEmpty(eqField.TodayCol))
-            {
-                string cumCol = NextNextColumn(eqField.TodayCol);
-                for (int row = eqField.StartRow; row <= eqField.EndRow; row++)
-                {
-                    string? name = CellHelper.GetCellValue(wsPart, $"{eqField.NameCol}{row}");
-                    if (string.IsNullOrWhiteSpace(name)) continue;
-                    var vm = Equipment.FirstOrDefault(e => Norm(e.Name) == Norm(name));
-                    if (vm == null) continue;
-                    vm.PrevDayCount = CellHelper.GetCellInt(wsPart, $"{cumCol}{row}") ?? 0;
-                }
-            }
-
-            if (pnField != null && !string.IsNullOrEmpty(pnField.RoleCol)
-                                && !string.IsNullOrEmpty(pnField.TodayCol))
-            {
-                string cumCol = NextNextColumn(pnField.TodayCol);
-                for (int row = pnField.StartRow; row <= pnField.EndRow; row++)
-                {
-                    string? role = CellHelper.GetCellValue(wsPart, $"{pnField.RoleCol}{row}");
-                    if (string.IsNullOrWhiteSpace(role)) continue;
-                    var vm = Personnel.FirstOrDefault(p => Norm(p.Role) == Norm(role));
-                    if (vm == null) continue;
-                    vm.PrevCumulativeCount = CellHelper.GetCellInt(wsPart, $"{cumCol}{row}") ?? 0;
-                }
-            }
+            PrevSourceText = "이전 날짜에 만든 공사일보가 없습니다. 처음 쓰는 날이면 '전일(대)'와 '전일누계(명)'에 " +
+                             "지금까지의 누계를 직접 입력하세요. 이 값이 기준이 되어 다음 날부터는 자동으로 이어집니다.";
+            return;
         }
-        catch { /* 읽기 오류 시 0 유지 */ }
-    }
 
-    private static string NextNextColumn(string col)
-    {
-        uint idx = CellHelper.ColLetterToIndex(col);
-        return ColIndexToLetter(idx + 2);
-    }
-
-    private static string ColIndexToLetter(uint index)
-    {
-        string result = "";
-        while (index > 0)
+        // 화면 목록과 같은 순서의 DailyInput 을 만들어 Core 에서 채운 뒤 다시 화면에 옮긴다
+        var input = BuildDailyInput();
+        try { GenericExcelWriter.LoadPreviousDay(prev.Value.Path, input, dailyDoc); }
+        catch (Exception ex)
         {
-            index--;
-            result  = (char)('A' + index % 26) + result;
-            index  /= 26;
+            PrevSourceText = $"{Path.GetFileName(prev.Value.Path)} 을(를) 읽지 못했습니다: {ex.Message}";
+            return;
         }
-        return result;
-    }
+        for (int i = 0; i < Equipment.Count; i++) Equipment[i].PrevDayCount        = input.Equipment[i].PrevDayCount;
+        for (int i = 0; i < Personnel.Count; i++) Personnel[i].PrevCumulativeCount = input.Personnel[i].PrevCumulativeCount;
 
-    private static string Norm(string s) => s.Trim().ToLowerInvariant();
+        PrevSourceText = $"전일 값은 {prev.Value.Date:MM/dd (ddd)} 공사일보의 누계(전일 + 금일)에서 가져왔습니다. " +
+                         "칸을 고치면 고친 값으로 만듭니다.";
+    }
 
     // ── 사진 슬롯 ────────────────────────────────────────────────────
 

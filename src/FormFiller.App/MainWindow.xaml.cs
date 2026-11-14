@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using FormFiller.App.ViewModels;
 using FormFiller.App.Views;
+using FormFiller.Core.Config;
 
 namespace FormFiller.App;
 
@@ -22,7 +23,21 @@ public partial class MainWindow : Window
             {
                 if (e.PropertyName == nameof(MainViewModel.CurrentStep)) BodyScroll.ScrollToTop();
             };
+
+        // 처음 실행이면 사용법 창을 한 번 띄운다
+        Loaded += (_, _) =>
+        {
+            var cfg = AppConfigLoader.Load();
+            if (cfg.HelpShown) return;
+            OpenHelp_Click(this, new RoutedEventArgs());
+            cfg.HelpShown = true;
+            AppConfigLoader.Save(cfg);
+        };
     }
+
+    /// <summary>사용법 창 열기</summary>
+    private void OpenHelp_Click(object sender, RoutedEventArgs e)
+        => new HelpWindow { Owner = this }.ShowDialog();
 
     /// <summary>설정 창 열기</summary>
     private void OpenSettings_Click(object sender, RoutedEventArgs e)

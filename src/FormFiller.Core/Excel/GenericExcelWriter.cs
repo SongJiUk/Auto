@@ -33,9 +33,14 @@ public static class GenericExcelWriter
     /// - personnel_table: todayCol(P) → 열인덱스(16) + 2 → 열인덱스(18) → "R"
     /// 수식 셀이므로 config 에 명시하지 않고 여기서 자동 계산한다.
     /// </summary>
-    /// <param name="prevFilePath">어제 공사일보_출력일보 파일 경로</param>
+    /// <param name="prevFilePath">이전 날짜 공사일보_출력일보 파일 경로 (FindPreviousFile 로 찾는다)</param>
     /// <param name="input">오늘 입력 데이터 (PrevDay 필드가 채워진다)</param>
     /// <param name="dailyDoc">공사일보 DocumentConfig</param>
+    /// <remarks>
+    /// 누계 칸은 수식이라, 프로그램이 만든 파일을 Excel 에서 열어 저장하기 전까지는
+    /// 저장된 값(캐시)이 서식 원본 숫자 그대로다. 그래서 "전일 + 금일" 값 칸(프로그램이 직접 쓴 칸)을
+    /// 더해서 누계를 구한다. 전일 열 설정이 없을 때만 수식 칸 값을 읽는다.
+    /// </remarks>
     public static void LoadPreviousDay(string prevFilePath, DailyInput input, DocumentConfig dailyDoc)
     {
         if (!File.Exists(prevFilePath)) return;
@@ -45,26 +50,30 @@ public static class GenericExcelWriter
         var       wsPart = CellHelper.FindWorksheetPart(wbPart, dailyDoc.SheetName);
         if (wsPart == null) return;
 
+        // 누계 = 전일 칸 + 금일 칸. 전일 열이 없으면 누계 수식 칸(금일 열 + 2)의 저장된 값.
+        int Cumulative(string? prevCol, string todayCol, int row)
+        {
+            if (!string.IsNullOrEmpty(prevCol))
+                return (CellHelper.GetCellInt(wsPart, $"{prevCol}{row}") ?? 0)
+                     + (CellHelper.GetCellInt(wsPart, $"{todayCol}{row}") ?? 0);
+            string cumCol = IndexToColLetter(CellHelper.ColLetterToIndex(todayCol) + 2);
+            return CellHelper.GetCellInt(wsPart, $"{cumCol}{row}") ?? 0;
+        }
+
         // ── equipment_table 필드 찾기 ────────────────────────────────
         var eqField = dailyDoc.Fields.FirstOrDefault(f => f.Type == FieldTypes.EquipmentTable);
         if (eqField != null && !string.IsNullOrEmpty(eqField.NameCol) && !string.IsNullOrEmpty(eqField.TodayCol))
         {
-            // 누계 열 = todayCol(H) 의 열인덱스 + 2 (수식 셀이므로 직접 쓰지 않고 읽기만 한다)
-            string cumCol = IndexToColLetter(CellHelper.ColLetterToIndex(eqField.TodayCol) + 2);
-
             for (int row = eqField.StartRow; row <= eqField.EndRow; row++)
             {
-                string nameAddr = $"{eqField.NameCol}{row}";
-                string cumAddr  = $"{cumCol}{row}";
-
-                string? cellName = CellHelper.GetCellValue(wsPart, nameAddr);
+                string? cellName = CellHelper.GetCellValue(wsPart, $"{eqField.NameCol}{row}");
                 if (string.IsNullOrWhiteSpace(cellName)) continue;
 
                 var entry = input.Equipment
                                  .FirstOrDefault(e => NormName(e.Name) == NormName(cellName));
                 if (entry == null) continue;
 
-                entry.PrevDayCount = CellHelper.GetCellInt(wsPart, cumAddr) ?? 0;
+                entry.PrevDayCount = Cumulative(eqField.PrevDayCol, eqField.TodayCol, row);
             }
         }
 
@@ -72,24 +81,34 @@ public static class GenericExcelWriter
         var pnField = dailyDoc.Fields.FirstOrDefault(f => f.Type == FieldTypes.PersonnelTable);
         if (pnField != null && !string.IsNullOrEmpty(pnField.RoleCol) && !string.IsNullOrEmpty(pnField.TodayCol))
         {
-            // 총누계 열 = todayCol(P) 의 열인덱스 + 2
-            string cumCol = IndexToColLetter(CellHelper.ColLetterToIndex(pnField.TodayCol) + 2);
-
             for (int row = pnField.StartRow; row <= pnField.EndRow; row++)
             {
-                string roleAddr = $"{pnField.RoleCol}{row}";
-                string cumAddr  = $"{cumCol}{row}";
-
-                string? cellRole = CellHelper.GetCellValue(wsPart, roleAddr);
+                string? cellRole = CellHelper.GetCellValue(wsPart, $"{pnField.RoleCol}{row}");
                 if (string.IsNullOrWhiteSpace(cellRole)) continue;
 
                 var entry = input.Personnel
                                  .FirstOrDefault(p => NormName(p.Role) == NormName(cellRole));
                 if (entry == null) continue;
 
-                entry.PrevCumulativeCount = CellHelper.GetCellInt(wsPart, cumAddr) ?? 0;
+                entry.PrevCumulativeCount = Cumulative(pnField.PrevCumulativeCol, pnField.TodayCol, row);
             }
         }
+    }
+
+    /// <summary>
+    /// date 보다 앞선 날짜 중 가장 최근에 만든 파일을 찾는다 (주말·쉬는 날 건너뜀).
+    /// 최대 maxDays 일 전까지 본다. 없으면 null.
+    /// </summary>
+    public static (string Path, DateTime Date)? FindPreviousFile(
+        DateTime date, string outputPattern, string baseDir, string outputFolder, int maxDays = 60)
+    {
+        for (int i = 1; i <= maxDays; i++)
+        {
+            DateTime d    = date.Date.AddDays(-i);
+            string   path = BuildOutputPath(d, outputPattern, baseDir, outputFolder);
+            if (File.Exists(path)) return (path, d);
+        }
+        return null;
     }
 
     /// <summary>

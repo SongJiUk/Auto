@@ -38,6 +38,9 @@ public class AppConfig
 
     /// <summary>파일 생성이 끝나면 만든 파일을 바로 Excel(또는 한글)로 열지 여부</summary>
     public bool OpenAfterGenerate { get; set; } = true;
+
+    /// <summary>처음 실행할 때 사용법 창을 이미 보여 줬는지 (false 면 시작할 때 자동으로 연다)</summary>
+    public bool HelpShown { get; set; } = false;
 }
 
 /// <summary>
