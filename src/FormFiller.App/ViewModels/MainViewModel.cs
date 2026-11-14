@@ -64,6 +64,9 @@ public class MainViewModel : ViewModelBase
     public ObservableCollection<PhotoSlotViewModel> PhotoSlots { get; } = [];
     public bool HasPhotoSlots => PhotoSlots.Count > 0;
 
+    /// <summary>화면용: 사진대지 칸을 문서마다 묶은 것</summary>
+    public ObservableCollection<PhotoSlotGroup> PhotoSlotGroups { get; } = [];
+
     // 문서별 입력 (소음측정 사진·측정값·장비 위치 등, 시트마다 따로)
     public ObservableCollection<DocInputCardViewModel> DocInputCards { get; } = [];
     public bool HasDocInputs => DocInputCards.Count > 0;
@@ -172,6 +175,7 @@ public class MainViewModel : ViewModelBase
 
         foreach (var card in DocInputCards) card.IsVisible = ids.Contains(card.Config.Id);
         foreach (var slot in PhotoSlots)    slot.IsVisible = ids.Contains(slot.DocumentId);
+        foreach (var g in PhotoSlotGroups)  g.IsVisible    = ids.Contains(g.DocumentId);
         SetField(ref _hasVisibleDocInputs,  DocInputCards.Any(c => c.IsVisible), nameof(HasVisibleDocInputs));
         SetField(ref _hasVisiblePhotoSlots, PhotoSlots.Any(s => s.IsVisible),    nameof(HasVisiblePhotoSlots));
         SetField(ref _noDocChecked,         docs.Count == 0,                     nameof(NoDocChecked));
@@ -224,7 +228,11 @@ public class MainViewModel : ViewModelBase
     private static bool IsBlankWork(string text) => text.Trim().TrimStart('-').Trim().Length == 0;
 
     /// <summary>항목 값이 바뀌면 단계 ✔ 를 다시 계산하도록 연결한다.</summary>
-    private void Track(INotifyPropertyChanged item) => item.PropertyChanged += (_, _) => RefreshSteps();
+    private void Track(INotifyPropertyChanged item) => item.PropertyChanged += (_, e) =>
+    {
+        if (UserEditedProps.Contains(e.PropertyName ?? "")) MarkDirty();
+        RefreshSteps();
+    };
 
     private void TrackCollection<T>(ObservableCollection<T> list) where T : INotifyPropertyChanged
     {
@@ -232,9 +240,21 @@ public class MainViewModel : ViewModelBase
         {
             if (e.NewItems != null)
                 foreach (T item in e.NewItems) Track(item);
+            MarkDirty();
             RefreshSteps();
         };
     }
+
+    // ── 저장 안 한 입력 (닫을 때 확인) ───────────────────────────────
+    // 사용자가 직접 바꾸는 값만 센다. 전일 값처럼 프로그램이 불러와 넣는 값은 세지 않는다.
+    private static readonly HashSet<string> UserEditedProps =
+        ["Text", "TodayCount", "Name", "Spec", "Role", "Value", "PhotoPath", "SelectedImagePath", "SelectedPreset"];
+
+    private bool _trackDirty;      // 처음 화면을 채우는 동안은 세지 않는다
+    private bool _hasUnsavedInput;
+    /// <summary>입력을 바꾼 뒤 아직 파일을 만들지 않았는지</summary>
+    public bool HasUnsavedInput => _hasUnsavedInput;
+    private void MarkDirty() { if (_trackDirty) _hasUnsavedInput = true; }
 
     // ── 합계 (읽기 전용) ──────────────────────────────────────────────
     public int TotalTodayEquipment  => Equipment.Sum(e => e.TodayCount);
@@ -263,6 +283,14 @@ public class MainViewModel : ViewModelBase
     // AI 도우미
     public ICommand OpenAiAssistantCommand      { get; }
 
+    // 장비·인원: 앞 날짜 금일 값 그대로
+    public ICommand CopyLastFileTodayCommand    { get; }
+
+    // 날짜 빠르게 바꾸기
+    public ICommand PrevDayCommand              { get; }
+    public ICommand NextDayCommand              { get; }
+    public ICommand TodayCommand                { get; }
+
     public MainViewModel()
     {
         GenerateCommand          = new RelayCommand(_ => OnGenerate());
@@ -283,6 +311,11 @@ public class MainViewModel : ViewModelBase
 
         PrevStepCommand          = new RelayCommand(_ => MoveStep(-1), _ => HasPrevStep);
         NextStepCommand          = new RelayCommand(_ => MoveStep(+1), _ => HasNextStep);
+
+        CopyLastFileTodayCommand = new RelayCommand(_ => CopyLastFileToday(), _ => HasLastFileToday);
+        PrevDayCommand           = new RelayCommand(_ => TargetDate = TargetDate.AddDays(-1));
+        NextDayCommand           = new RelayCommand(_ => TargetDate = TargetDate.AddDays(1));
+        TodayCommand             = new RelayCommand(_ => TargetDate = DateTime.Today, _ => TargetDate.Date != DateTime.Today);
 
         // 입력이 바뀌면 왼쪽 단계의 ✔ 와 요약을 갱신 (항목을 넣기 전에 연결해 둔다)
         TrackCollection(TodayMorningItems);
@@ -305,6 +338,7 @@ public class MainViewModel : ViewModelBase
         LoadDocumentDueList();
         LoadPhotoSlots();
         LoadDocInputCards();
+        _trackDirty = true;
     }
 
     // ── 기본 장비·인원 초기화 ────────────────────────────────────────
@@ -439,6 +473,13 @@ public class MainViewModel : ViewModelBase
             };
             DocumentDueList.Add(item);
         }
+
+        // 저장 파일 이름이 겹치는 문서는 목록에서 바로 알려 준다
+        foreach (var g in DocumentDueList.GroupBy(d => d.Config.OutputPattern, StringComparer.OrdinalIgnoreCase)
+                                         .Where(g => g.Count() > 1))
+            foreach (var d in g)
+                d.SetDuplicateName(string.Join(", ", g.Where(o => o != d).Select(o => o.Name)));
+
         RefreshUsage();
     }
 
@@ -609,6 +650,7 @@ public class MainViewModel : ViewModelBase
             else                   targets[i].SetFailed(errors[i]!);
         }
         AppLog.Info($"파일 생성 끝: 성공 {errors.Count(e => e == null)}개, 실패 {errors.Count(e => e != null)}개");
+        if (errors.Any(e => e == null)) _hasUnsavedInput = false;
         return notes;
     }
 
@@ -726,6 +768,26 @@ public class MainViewModel : ViewModelBase
         GenericExcelWriter.FindPreviousFile(TargetDate, dailyDoc.OutputPattern,
                                             AppDomain.CurrentDomain.BaseDirectory, config.OutputFolder);
 
+    private static void CopyPersonnel(ObservableCollection<PersonnelEntryViewModel> target, List<PersonnelEntry> source)
+    {
+        for (int i = 0; i < Math.Min(target.Count, source.Count); i++)
+        {
+            target[i].PrevCumulativeCount = source[i].PrevCumulativeCount;
+            target[i].LastFileTodayCount  = source[i].LastFileTodayCount;
+        }
+    }
+
+    private bool _hasLastFileToday;
+    /// <summary>앞 날짜 파일에 금일 값이 있어 [전일과 같게] 를 쓸 수 있는지</summary>
+    public bool HasLastFileToday { get => _hasLastFileToday; private set => SetField(ref _hasLastFileToday, value); }
+
+    /// <summary>[전일과 같게]: 앞 날짜 파일의 금일 대수·인원을 오늘 금일 칸에 그대로 넣는다 (현장 구성이 매일 비슷해서).</summary>
+    private void CopyLastFileToday()
+    {
+        foreach (var e in Equipment) e.TodayCount = e.LastFileTodayCount;
+        foreach (var p in Personnel.Concat(SujangjaePersonnel)) p.TodayCount = p.LastFileTodayCount;
+    }
+
     // 날짜를 빠르게 여러 번 바꾸면 앞의 읽기 결과는 버리고 마지막 것만 화면에 넣는다
     private int _prevLoadVersion;
 
@@ -757,6 +819,7 @@ public class MainViewModel : ViewModelBase
             if (version != _prevLoadVersion) return;   // 그 사이 날짜가 또 바뀜
 
             HasPrevFile = prev != null;
+            if (prev == null) HasLastFileToday = false;
             if (prev == null)
             {
                 PrevSourceText = "이전 날짜에 만든 공사일보가 없습니다. 처음 쓰는 날이면 '전일(대)'와 '전일누계(명)'에 " +
@@ -772,9 +835,14 @@ public class MainViewModel : ViewModelBase
 
             // 읽는 사이 줄을 더하거나 지웠을 수 있어 겹치는 줄까지만 옮긴다
             for (int i = 0; i < Math.Min(Equipment.Count, input.Equipment.Count); i++)
-                Equipment[i].PrevDayCount = input.Equipment[i].PrevDayCount;
-            for (int i = 0; i < Math.Min(Personnel.Count, input.Personnel.Count); i++)
-                Personnel[i].PrevCumulativeCount = input.Personnel[i].PrevCumulativeCount;
+            {
+                Equipment[i].PrevDayCount       = input.Equipment[i].PrevDayCount;
+                Equipment[i].LastFileTodayCount = input.Equipment[i].LastFileTodayCount;
+            }
+            CopyPersonnel(Personnel, input.Personnel);
+            CopyPersonnel(SujangjaePersonnel, input.SujangjaePersonnel);
+            HasLastFileToday = Equipment.Any(e => e.LastFileTodayCount > 0)
+                            || Personnel.Concat(SujangjaePersonnel).Any(p => p.LastFileTodayCount > 0);
 
             PrevSourceText = $"전일 값은 {prev.Value.Date:MM/dd (ddd)} 공사일보의 누계(전일 + 금일)에서 가져왔습니다. " +
                              "칸을 고치면 고친 값으로 만듭니다.";
@@ -788,21 +856,42 @@ public class MainViewModel : ViewModelBase
 
     // ── 사진 슬롯 ────────────────────────────────────────────────────
 
-    private void LoadPhotoSlots()
+    private int _photoSlotsVersion;
+
+    /// <summary>
+    /// 서식 파일을 열어 사진대지 칸을 읽는다. 서식을 여는 게 느려서(드라이브면 더) 뒤 스레드에서 읽고,
+    /// 화면이 먼저 뜬 다음 칸을 채운다.
+    /// </summary>
+    private async void LoadPhotoSlots()
     {
-        PhotoSlots.Clear();
+        int version = ++_photoSlotsVersion;
         var    config  = AppConfigLoader.Load();
         string baseDir = AppDomain.CurrentDomain.BaseDirectory;
 
-        foreach (var doc in config.Documents)
+        List<(DocumentConfig Doc, List<ExcelPhotoWriter.PhotoSlotInfo> Infos)> found;
+        try
         {
-            if (string.IsNullOrWhiteSpace(doc.PhotoSheet)) continue;
-            string templatePath = Path.IsPathRooted(doc.TemplateFile)
-                ? doc.TemplateFile
-                : Path.Combine(baseDir, doc.TemplateFile);
-            if (!File.Exists(templatePath)) continue;
+            found = await Task.Run(() =>
+            {
+                var list = new List<(DocumentConfig, List<ExcelPhotoWriter.PhotoSlotInfo>)>();
+                foreach (var doc in config.Documents)
+                {
+                    if (string.IsNullOrWhiteSpace(doc.PhotoSheet)) continue;
+                    string templatePath = Path.Combine(baseDir, doc.TemplateFile);   // 절대 경로면 그대로
+                    if (!File.Exists(templatePath)) continue;
+                    try { list.Add((doc, ExcelPhotoWriter.GetPhotoSlotInfos(templatePath, doc.PhotoSheet))); }
+                    catch (Exception ex) { AppLog.Error($"사진대지 칸 읽기 실패: {doc.Name}", ex); }
+                }
+                return list;
+            });
+        }
+        catch (Exception ex) { AppLog.Error("사진대지 칸 읽기 실패", ex); return; }
+        if (version != _photoSlotsVersion) return;   // 그 사이 다시 읽기 시작함
 
-            var slotInfos = ExcelPhotoWriter.GetPhotoSlotInfos(templatePath, doc.PhotoSheet);
+        PhotoSlots.Clear();
+        PhotoSlotGroups.Clear();
+        foreach (var (doc, slotInfos) in found)
+        {
             foreach (var info in slotInfos)
             {
                 string? savedLabel = doc.PhotoSlots
@@ -813,6 +902,8 @@ public class MainViewModel : ViewModelBase
                 Track(slot);
                 PhotoSlots.Add(slot);
             }
+            var docSlots = PhotoSlots.Where(s => s.DocumentId == doc.Id).ToList();
+            if (docSlots.Count > 0) PhotoSlotGroups.Add(new PhotoSlotGroup(doc.Id, doc.Name, docSlots));
         }
         OnPropertyChanged(nameof(HasPhotoSlots));
         RefreshUsage();

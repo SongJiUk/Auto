@@ -73,6 +73,10 @@
 - `AppConfigLoader.Load` 는 config.json 글자를 캐시(파일 시각·크기 같으면 다시 안 읽음). 매번 새 객체를 돌려주는 동작은 그대로.
 - `FindPreviousFile` 은 폴더 목록을 한 번만 읽는다.
 - 기록: `AppLog` → exe 옆 `logs\log_PC이름.txt` (1MB 넘으면 .old). 처리 못 한 오류는 `App.xaml.cs` 에서 기록 + 안내창, 프로그램은 안 꺼짐.
+- UI 다듬기 2차: 문서 목록에 서식 없음·저장 이름 겹침 빨간 글씨(서식 없으면 기본 체크 해제), 이름 눌러도 체크. 날짜 ◀ ▶ [오늘]. 장비·인원 표 한 번 클릭 편집(`Cell_PreviewMouseLeftButtonDown`, 실제 마우스로는 아직 미확인). [↻ 금일 칸을 전일과 같게] (`LastFileTodayCount`). 사진대지 칸 문서별 묶음(`PhotoSlotGroup`). 입력 후 생성 안 하고 닫으면 확인(`HasUnsavedInput`). 사진대지 칸 읽기 뒤 스레드.
+- 수정: 수장재 인원 전일누계가 이어지지 않던 문제 (`LoadPreviousDay` 가 수장재 목록도 찾음).
+- 시작 시간: 약 3초(두 번째 실행부터)는 대부분 .NET/WPF 자체. ReadyToRun 은 차이 없어서 안 씀.
+- 화면 시험 주의: 사용자가 이 PC를 쓰는 중일 수 있으니 실제 마우스·키보드 입력(SetCursorPos, SendKeys)은 쓰지 않는다. UI Automation 패턴과 PrintWindow 캡처만. 프로세스 종료는 경로로 걸러 테스트 사본만.
 - 백업: `GenericExcelWriter.Generate` 가 같은 날짜 파일이 있으면 `output\백업\이름_시각.확장자` 로 복사 후 덮어씀 (30일 지나면 삭제).
 
 ## 이전 작업 (2026-11-13)

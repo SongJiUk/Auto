@@ -137,3 +137,21 @@ public class PhotoSlotViewModel : ViewModelBase
             SelectedImagePath = filePath;
     }
 }
+
+/// <summary>사진대지 칸을 문서마다 묶은 것 (화면에서 문서 이름 아래에 칸을 모아 보여 준다)</summary>
+public class PhotoSlotGroup : ViewModelBase
+{
+    public string DocumentId { get; }
+    public string Header { get; }
+    public List<PhotoSlotViewModel> Slots { get; }
+
+    private bool _isVisible = true;
+    public bool IsVisible { get => _isVisible; set => SetField(ref _isVisible, value); }
+
+    public PhotoSlotGroup(string documentId, string name, List<PhotoSlotViewModel> slots)
+    {
+        DocumentId = documentId;
+        Slots      = slots;
+        Header     = $"{name} · {slots.Count}칸";
+    }
+}

@@ -1,5 +1,9 @@
 using System.Windows;
+using System.ComponentModel;
 using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Threading;
 using FormFiller.App.ViewModels;
 using FormFiller.App.Views;
 using FormFiller.Core.Config;
@@ -33,6 +37,65 @@ public partial class MainWindow : Window
             cfg.HelpShown = true;
             AppConfigLoader.Save(cfg);
         };
+    }
+
+    // ── 표 칸 한 번 클릭으로 고치기 ─────────────────────────────────
+
+    /// <summary>
+    /// 고칠 수 있는 칸을 누르면 바로 입력 상태로 바꾸고 글자를 모두 골라 둔다.
+    /// 그래서 "0" 을 지우지 않고 숫자를 바로 치면 된다.
+    /// 삭제 버튼·누계처럼 고치는 모양이 없는 칸은 그대로 둔다.
+    /// </summary>
+    private void Cell_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not DataGridCell cell || cell.IsEditing || cell.IsReadOnly) return;
+        if (cell.Column is DataGridTemplateColumn { CellEditingTemplate: null }) return;
+
+        // 널리 쓰는 WPF 방식: 칸에 포커스를 주고 줄을 미리 골라 두면,
+        // DataGrid 가 "이미 고른 칸을 다시 누름"으로 보고 이 클릭에서 바로 입력 상태로 바꾼다.
+        if (!cell.IsFocused) cell.Focus();
+        if (FindParent<DataGridRow>(cell) is { IsSelected: false } row) row.IsSelected = true;
+
+        // 입력 칸이 만들어진 뒤에 글자 전체 선택 (0 을 지우지 않고 바로 숫자를 치게)
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (cell.IsEditing && FindChild<TextBox>(cell) is { } box)
+            {
+                box.Focus();
+                box.SelectAll();
+            }
+        }, DispatcherPriority.Input);
+    }
+
+    private static T? FindParent<T>(DependencyObject child) where T : DependencyObject
+    {
+        for (var p = VisualTreeHelper.GetParent(child); p != null; p = VisualTreeHelper.GetParent(p))
+            if (p is T t) return t;
+        return null;
+    }
+
+    private static T? FindChild<T>(DependencyObject parent) where T : DependencyObject
+    {
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var c = VisualTreeHelper.GetChild(parent, i);
+            if (c is T t) return t;
+            if (FindChild<T>(c) is { } found) return found;
+        }
+        return null;
+    }
+
+    /// <summary>입력을 바꾸고 파일을 만들지 않은 채 닫으면 한 번 묻는다.</summary>
+    protected override void OnClosing(CancelEventArgs e)
+    {
+        if (DataContext is MainViewModel { HasUnsavedInput: true })
+        {
+            var r = MessageBox.Show(this,
+                "입력한 내용으로 아직 파일을 만들지 않았습니다.\n닫으면 입력한 내용이 사라집니다. 닫을까요?",
+                "닫기", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No);
+            if (r != MessageBoxResult.Yes) e.Cancel = true;
+        }
+        base.OnClosing(e);
     }
 
     /// <summary>사용법 창 열기</summary>

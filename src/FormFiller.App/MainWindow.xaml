@@ -39,6 +39,11 @@
             <Setter Property="Padding"           Value="4,0"/>
         </Style>
         <!-- 편집 가능 셀 -->
+        <!-- 표 칸: 한 번 클릭하면 바로 고칠 수 있게 (원래는 두 번 클릭해야 했음) -->
+        <Style TargetType="DataGridCell">
+            <EventSetter Event="PreviewMouseLeftButtonDown" Handler="Cell_PreviewMouseLeftButtonDown"/>
+        </Style>
+
         <Style x:Key="EditCell" TargetType="TextBox">
             <Setter Property="TextAlignment" Value="Center"/>
             <Setter Property="Padding"       Value="4,2"/>
@@ -310,12 +315,18 @@
                                             <ColumnDefinition Width="Auto"/>
                                             <ColumnDefinition Width="Auto"/>
                                         </Grid.ColumnDefinitions>
-                                        <CheckBox Grid.Column="0"
+                                        <!-- 이름을 눌러도 체크되도록 이름을 체크박스 안에 넣는다 -->
+                                        <CheckBox Grid.Column="0" Grid.ColumnSpan="2"
                                                   IsChecked="{Binding IsChecked, Mode=TwoWay}"
-                                                  VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                        <TextBlock Grid.Column="1"
-                                                   Text="{Binding Name}"
-                                                   VerticalAlignment="Center" Foreground="#2D3748"/>
+                                                  VerticalAlignment="Center" VerticalContentAlignment="Top"
+                                                  Cursor="Hand">
+                                            <StackPanel Margin="4,0,0,0">
+                                                <TextBlock Text="{Binding Name}" Foreground="#2D3748"/>
+                                                <TextBlock Text="{Binding Warning}" Foreground="#E53E3E" FontSize="11"
+                                                           TextWrapping="Wrap" Margin="0,2,0,0"
+                                                           Visibility="{Binding HasWarning, Converter={StaticResource BoolVis}}"/>
+                                            </StackPanel>
+                                        </CheckBox>
                                         <TextBlock Grid.Column="2"
                                                    Text="{Binding FrequencyLabel}"
                                                    Foreground="#718096" FontSize="11"
@@ -338,17 +349,28 @@
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="160"/>
+                            <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="20"/>
                             <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="140"/>
                         </Grid.ColumnDefinitions>
                         <TextBlock Grid.Column="0" Text="날짜" Style="{StaticResource LabelStyle}"/>
-                        <DatePicker Grid.Column="1"
+                        <!-- 하루씩 앞뒤로, [오늘] 로 바로 돌아오기 -->
+                        <Button Grid.Column="1" Content="◀" Width="28" Margin="0,0,4,0" ToolTip="하루 전"
+                                Command="{Binding PrevDayCommand}" Background="White" BorderBrush="#CBD5E0" Cursor="Hand"/>
+                        <DatePicker Grid.Column="2"
                                     SelectedDate="{Binding TargetDate, Mode=TwoWay}"
                                     FirstDayOfWeek="Monday"/>
-                        <TextBlock Grid.Column="3" Text="날씨" Style="{StaticResource LabelStyle}"/>
-                        <ComboBox Grid.Column="4"
+                        <StackPanel Grid.Column="3" Orientation="Horizontal">
+                            <Button Content="▶" Width="28" Margin="4,0,0,0" ToolTip="하루 뒤"
+                                    Command="{Binding NextDayCommand}" Background="White" BorderBrush="#CBD5E0" Cursor="Hand"/>
+                            <Button Content="오늘" Padding="10,0" Margin="4,0,0,0"
+                                    Command="{Binding TodayCommand}" Background="White" BorderBrush="#CBD5E0" Cursor="Hand"/>
+                        </StackPanel>
+                        <TextBlock Grid.Column="5" Text="날씨" Style="{StaticResource LabelStyle}"/>
+                        <ComboBox Grid.Column="6"
                                   ItemsSource="{Binding WeatherOptions}"
                                   SelectedItem="{Binding Weather, Mode=TwoWay}"/>
                     </Grid>
@@ -515,6 +537,15 @@
                     </Border.Style>
                     <TextBlock Text="{Binding PrevSourceText}" TextWrapping="Wrap" FontSize="12" Foreground="#2D3748"/>
                 </Border>
+
+                <!-- 현장 구성이 매일 비슷하니 앞 날짜 금일 값을 한 번에 가져온다 -->
+                <DockPanel Margin="0,0,0,8" Visibility="{Binding HasLastFileToday, Converter={StaticResource BoolVis}}">
+                    <Button DockPanel.Dock="Left" Content="↻ 금일 칸을 전일과 같게"
+                            Command="{Binding CopyLastFileTodayCommand}"
+                            Padding="12,5" Background="#EBF8FF" Foreground="#2B6CB0" BorderBrush="#90CDF4" Cursor="Hand"/>
+                    <TextBlock Text="앞 날짜 공사일보의 금일 대수·인원을 그대로 넣습니다. 넣은 뒤 다른 것만 고치세요."
+                               VerticalAlignment="Center" Margin="10,0,0,0" FontSize="11" Foreground="#718096" TextWrapping="Wrap"/>
+                </DockPanel>
 
                 <!-- 장비 투입현황 -->
                 <GroupBox Header="장비 투입현황"
@@ -966,12 +997,18 @@
                     <StackPanel>
                         <TextBlock Foreground="#718096" FontSize="11" Margin="0,0,0,8"
                                    Text="이미지 파일을 슬롯에 드래그하거나 클릭해서 선택하세요."/>
-                        <ItemsControl ItemsSource="{Binding PhotoSlots}">
+                        <!-- 문서마다 묶어서 보여 준다 (체크한 문서만) -->
+                        <ItemsControl ItemsSource="{Binding PhotoSlotGroups}">
                             <ItemsControl.ItemContainerStyle>
                                 <Style TargetType="ContentPresenter">
                                     <Setter Property="Visibility" Value="{Binding IsVisible, Converter={StaticResource BoolVis}}"/>
                                 </Style>
                             </ItemsControl.ItemContainerStyle>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Margin="0,0,0,10">
+                                        <TextBlock Text="{Binding Header}" FontWeight="SemiBold" Foreground="#2B6CB0" Margin="2,0,0,6"/>
+                        <ItemsControl ItemsSource="{Binding Slots}">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate>
                                     <WrapPanel Orientation="Horizontal"/>
@@ -1081,6 +1118,10 @@
                                             </Grid>
                                         </Grid>
                                     </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                                    </StackPanel>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>

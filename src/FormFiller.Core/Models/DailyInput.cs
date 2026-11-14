@@ -110,6 +110,9 @@ public class EquipmentEntry
     /// <summary>금일(대) — 사용자 입력</summary>
     public int TodayCount { get; set; }
 
+    /// <summary>앞 날짜 파일의 금일(대) — [전일과 같게] 버튼용. 파일에는 쓰지 않는다.</summary>
+    public int LastFileTodayCount { get; set; }
+
     /// <summary>
     /// 누계 = 전일 + 금일.
     /// 엑셀의 J열은 이미 =F+H 수식이 있으므로 여기서는 참조용으로만 사용.
@@ -131,6 +134,9 @@ public class PersonnelEntry
 
     /// <summary>금일(명) — 사용자 입력</summary>
     public int TodayCount { get; set; }
+
+    /// <summary>앞 날짜 파일의 금일(명) — [전일과 같게] 버튼용. 파일에는 쓰지 않는다.</summary>
+    public int LastFileTodayCount { get; set; }
 
     /// <summary>
     /// 총누계 = 전일누계 + 금일.

@@ -49,6 +49,9 @@ public class EquipmentEntryViewModel : ViewModelBase
     // 누계 = 전일 + 금일 (읽기 전용)
     public int TotalCount => PrevDayCount + TodayCount;
 
+    /// <summary>앞 날짜 파일의 금일(대). [전일과 같게] 를 누르면 금일 칸에 넣는다.</summary>
+    public int LastFileTodayCount { get; set; }
+
     /// <summary>이 행을 목록에서 제거하는 커맨드. 부모 ViewModel이 주입한다.</summary>
     public ICommand RemoveCommand { get; }
 

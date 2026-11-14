@@ -73,7 +73,8 @@ public static class GenericExcelWriter
                                  .FirstOrDefault(e => NormName(e.Name) == NormName(cellName));
                 if (entry == null) continue;
 
-                entry.PrevDayCount = Cumulative(eqField.PrevDayCol, eqField.TodayCol, row);
+                entry.PrevDayCount       = Cumulative(eqField.PrevDayCol, eqField.TodayCol, row);
+                entry.LastFileTodayCount = CellHelper.GetCellInt(wsPart, $"{eqField.TodayCol}{row}") ?? 0;
             }
         }
 
@@ -86,11 +87,12 @@ public static class GenericExcelWriter
                 string? cellRole = CellHelper.GetCellValue(wsPart, $"{pnField.RoleCol}{row}");
                 if (string.IsNullOrWhiteSpace(cellRole)) continue;
 
-                var entry = input.Personnel
+                var entry = input.GetPersonnelFor(includesSujangjae: true)   // 수장재 줄도 같은 표에 있을 수 있다
                                  .FirstOrDefault(p => NormName(p.Role) == NormName(cellRole));
                 if (entry == null) continue;
 
                 entry.PrevCumulativeCount = Cumulative(pnField.PrevCumulativeCol, pnField.TodayCol, row);
+                entry.LastFileTodayCount  = CellHelper.GetCellInt(wsPart, $"{pnField.TodayCol}{row}") ?? 0;
             }
         }
     }
