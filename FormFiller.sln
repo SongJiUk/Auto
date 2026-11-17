@@ -1,4 +1,4 @@
-
+﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
@@ -7,19 +7,61 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FormFiller.Core", "src\Form
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FormFiller.App", "src\FormFiller.App\FormFiller.App.csproj", "{54DD9224-FDEF-43B0-B168-44C0703B2951}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{827E0CD3-B72D-47B6-A68D-7590B98EB39B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FormFiller.Tests", "src\FormFiller.Tests\FormFiller.Tests.csproj", "{5300A1C2-0CCF-4B19-8108-8D513B8576EA}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
+		Debug|x64 = Debug|x64
+		Debug|x86 = Debug|x86
 		Release|Any CPU = Release|Any CPU
+		Release|x64 = Release|x64
+		Release|x86 = Release|x86
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
 		{4F000302-8CD1-4E2A-913D-82BB63934FE9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{4F000302-8CD1-4E2A-913D-82BB63934FE9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4F000302-8CD1-4E2A-913D-82BB63934FE9}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{4F000302-8CD1-4E2A-913D-82BB63934FE9}.Debug|x64.Build.0 = Debug|Any CPU
+		{4F000302-8CD1-4E2A-913D-82BB63934FE9}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{4F000302-8CD1-4E2A-913D-82BB63934FE9}.Debug|x86.Build.0 = Debug|Any CPU
 		{4F000302-8CD1-4E2A-913D-82BB63934FE9}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{4F000302-8CD1-4E2A-913D-82BB63934FE9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4F000302-8CD1-4E2A-913D-82BB63934FE9}.Release|x64.ActiveCfg = Release|Any CPU
+		{4F000302-8CD1-4E2A-913D-82BB63934FE9}.Release|x64.Build.0 = Release|Any CPU
+		{4F000302-8CD1-4E2A-913D-82BB63934FE9}.Release|x86.ActiveCfg = Release|Any CPU
+		{4F000302-8CD1-4E2A-913D-82BB63934FE9}.Release|x86.Build.0 = Release|Any CPU
 		{54DD9224-FDEF-43B0-B168-44C0703B2951}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{54DD9224-FDEF-43B0-B168-44C0703B2951}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{54DD9224-FDEF-43B0-B168-44C0703B2951}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{54DD9224-FDEF-43B0-B168-44C0703B2951}.Debug|x64.Build.0 = Debug|Any CPU
+		{54DD9224-FDEF-43B0-B168-44C0703B2951}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{54DD9224-FDEF-43B0-B168-44C0703B2951}.Debug|x86.Build.0 = Debug|Any CPU
 		{54DD9224-FDEF-43B0-B168-44C0703B2951}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{54DD9224-FDEF-43B0-B168-44C0703B2951}.Release|Any CPU.Build.0 = Release|Any CPU
+		{54DD9224-FDEF-43B0-B168-44C0703B2951}.Release|x64.ActiveCfg = Release|Any CPU
+		{54DD9224-FDEF-43B0-B168-44C0703B2951}.Release|x64.Build.0 = Release|Any CPU
+		{54DD9224-FDEF-43B0-B168-44C0703B2951}.Release|x86.ActiveCfg = Release|Any CPU
+		{54DD9224-FDEF-43B0-B168-44C0703B2951}.Release|x86.Build.0 = Release|Any CPU
+		{5300A1C2-0CCF-4B19-8108-8D513B8576EA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5300A1C2-0CCF-4B19-8108-8D513B8576EA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5300A1C2-0CCF-4B19-8108-8D513B8576EA}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{5300A1C2-0CCF-4B19-8108-8D513B8576EA}.Debug|x64.Build.0 = Debug|Any CPU
+		{5300A1C2-0CCF-4B19-8108-8D513B8576EA}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{5300A1C2-0CCF-4B19-8108-8D513B8576EA}.Debug|x86.Build.0 = Debug|Any CPU
+		{5300A1C2-0CCF-4B19-8108-8D513B8576EA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5300A1C2-0CCF-4B19-8108-8D513B8576EA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5300A1C2-0CCF-4B19-8108-8D513B8576EA}.Release|x64.ActiveCfg = Release|Any CPU
+		{5300A1C2-0CCF-4B19-8108-8D513B8576EA}.Release|x64.Build.0 = Release|Any CPU
+		{5300A1C2-0CCF-4B19-8108-8D513B8576EA}.Release|x86.ActiveCfg = Release|Any CPU
+		{5300A1C2-0CCF-4B19-8108-8D513B8576EA}.Release|x86.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{5300A1C2-0CCF-4B19-8108-8D513B8576EA} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 EndGlobal

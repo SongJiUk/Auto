@@ -6,7 +6,25 @@
       "Bash(python:*)",
       "Bash(where dotnet:*)",
       "Bash(mkdir -p \"C:/Users/wldnr/OneDrive/바탕 화면/서식채우기/src/FormFiller.Core\")",
-      "Bash(mkdir -p \"C:/Users/wldnr/OneDrive/바탕 화면/서식채우기/src/FormFiller.App/ViewModels\")"
+      "Bash(mkdir -p \"C:/Users/wldnr/OneDrive/바탕 화면/서식채우기/src/FormFiller.App/ViewModels\")",
+      "Bash(gh auth:*)",
+      "Bash(dir C:\\\\Users\\\\wldnr\\\\OneDrive\\\\바탕 화면\\\\서식채우기\\\\publish:*)",
+      "Bash(wmic datafile:*)",
+      "Bash(dir publish/FormFiller.App.exe)",
+      "Bash(dotnet script:*)",
+      "Bash(stat -c%s publish/FormFiller.App.exe)",
+      "Bash(dotnet build:*)",
+      "Bash(dotnet test:*)",
+      "Bash(dotnet format:*)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "command": "cd \"/c/Users/wldnr/OneDrive/바탕 화면/서식채우기\" && dotnet build FormFiller.sln -c Debug --no-restore -v quiet 2>&1 | tail -5",
+        "description": "C# 파일 수정 후 빌드 체크"
+      }
     ]
   }
 }
