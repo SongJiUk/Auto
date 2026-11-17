@@ -52,6 +52,12 @@
 - 코드를 고친 뒤: 빌드 → GitHub push → 사용자 확인 후 새 exe를 드라이브 폴더에 덮어쓴다. 덮어쓰기 전 `FormFiller.App` 실행 중인지 확인하고, 드라이브의 `config.json` 은 건드리지 않는다.
 - 바탕화면 `FormFiller_예전(지워도됨)` 은 드라이브로 옮기기 전 백업이다.
 
+## 빌드 (2026-11-17 정함: "항상 빌드")
+- 코드를 고치면 항상 빌드까지 확인하고 결과를 보고한다.
+- 클라우드(리눅스) 세션은 WPF 를 빌드할 수 없다 → push 하면 GitHub Actions(`.github/workflows/build.yml`, windows-latest)가 빌드·테스트한다. push 후 Actions 결과를 확인하고, 실패하면 로그를 읽고 고친다.
+- main 에 올라가면 Actions 가 `업무자동화.exe` 도 만든다 (Actions 실행 화면의 Artifacts, 7일 보관). 드라이브 덮어쓰기는 여전히 사용자 확인 후.
+- 리눅스에서도 Core·테스트는 `dotnet test src/FormFiller.Tests` 로 먼저 돌린다.
+
 ## 작업 방식
 - 큰 작업은 시작 전에 계획을 짧게 보여 준다. 각 단계가 끝나면 사용자가 직접 해 볼 체크리스트를 준다.
 - 단계는 `docs/기획.md`의 순서를 따른다. 지금은 1단계만 한다.
