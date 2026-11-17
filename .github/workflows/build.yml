@@ -1,0 +1,39 @@
+# push 할 때마다 GitHub 의 윈도우 PC 에서 빌드·테스트한다.
+# (WPF 는 윈도우에서만 빌드되므로 클라우드 작업 환경 대신 여기서 확인한다)
+# main 에 올라가면 실제로 쓰는 exe(업무자동화.exe)도 만들어 Actions 결과 화면에서 내려받을 수 있게 둔다.
+name: build
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: 빌드
+        run: dotnet build FormFiller.sln -c Release
+
+      - name: 테스트
+        run: dotnet test FormFiller.sln -c Release --no-build --verbosity normal
+
+      - name: exe 만들기 (main 만)
+        if: github.ref == 'refs/heads/main'
+        run: dotnet publish src/FormFiller.App/FormFiller.App.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:DebugType=none -o publish
+
+      - name: exe 올리기 (main 만)
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: 업무자동화-exe
+          path: publish/업무자동화.exe
+          retention-days: 7
