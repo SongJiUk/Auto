@@ -63,6 +63,13 @@ public class DocInputCardViewModel : ViewModelBase
                 f.FillInput(input, Config.Id, s.SheetName);
     }
 
+    /// <summary>구글 드라이브 창에서 사진 폴더를 바꿨을 때 화면에도 반영한다.</summary>
+    public void UpdatePhotoFolder(string folder)
+    {
+        Config.PhotoFolder = folder;
+        OnPropertyChanged(nameof(PhotoFolderText));
+    }
+
     // ── 사진 폴더에서 자동으로 불러오기 ───────────────────────────────
 
     private bool PickFolder()

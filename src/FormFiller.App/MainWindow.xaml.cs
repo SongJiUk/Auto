@@ -28,6 +28,9 @@ public partial class MainWindow : Window
                 if (e.PropertyName == nameof(MainViewModel.CurrentStep)) BodyScroll.ScrollToTop();
             };
 
+        // 구글 드라이브 점검은 뒤에서 하고, 중요한 문제가 있을 때만 상단 띠로 알린다
+        Loaded += async (_, _) => await CheckDriveAsync();
+
         // 처음 실행이면 사용법 창을 한 번 띄운다
         Loaded += (_, _) =>
         {
@@ -96,6 +99,57 @@ public partial class MainWindow : Window
             if (r != MessageBoxResult.Yes) e.Cancel = true;
         }
         base.OnClosing(e);
+    }
+
+    // ── 구글 드라이브 ───────────────────────────────────────────────
+
+    private async Task CheckDriveAsync()
+    {
+        try
+        {
+            var cfg     = AppConfigLoader.Load();
+            string bd   = AppDomain.CurrentDomain.BaseDirectory;
+            var items   = await Task.Run(() => DriveChecker.Run(cfg, bd));
+            var problem = items.FirstOrDefault(i => i.Important && i.State != CheckState.Ok);
+
+            if (problem == null)
+            {
+                DriveBanner.Visibility = Visibility.Collapsed;
+                return;
+            }
+            DriveBannerText.Text   = $"⚠ 구글 드라이브: {problem.Detail}  (눌러서 확인)";
+            DriveBanner.Visibility = Visibility.Visible;
+            AppLog.Info($"드라이브 점검 문제: {problem.Title} - {problem.Detail}");
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("시작 시 구글 드라이브 점검 실패", ex);
+        }
+    }
+
+    private void DriveBanner_Click(object sender, MouseButtonEventArgs e) => OpenDrive_Click(sender, e);
+
+    /// <summary>구글 드라이브 창 열기. 닫으면 폴더가 바뀌었을 수 있어 다시 읽고 다시 점검한다.</summary>
+    private async void OpenDrive_Click(object sender, RoutedEventArgs e)
+    {
+        string outputBefore = AppConfigLoader.Load().OutputFolder;
+        new DriveSettingsWindow { Owner = this }.ShowDialog();
+
+        // 출력 폴더는 시작할 때 전일 값을 읽는 데 쓰므로, 바꿨으면 다시 켜야 새 폴더 기준으로 읽는다
+        if (!string.Equals(outputBefore, AppConfigLoader.Load().OutputFolder, StringComparison.OrdinalIgnoreCase))
+            MessageBox.Show(this,
+                "출력 폴더를 바꿨습니다.\n전일 누계·어제 작업사항을 새 폴더에서 다시 읽으려면 프로그램을 다시 켜 주세요.",
+                "구글 드라이브", MessageBoxButton.OK, MessageBoxImage.Information);
+
+        // 입력해 둔 사진이 지워지지 않게 문서 목록은 다시 만들지 않고, 사진 폴더만 새 값으로 바꾼다
+        if (DataContext is MainViewModel vm)
+        {
+            var cfg = AppConfigLoader.Load();
+            foreach (var card in vm.DocInputCards)
+                if (cfg.Documents.FirstOrDefault(d => d.Id == card.Config.Id) is { } doc)
+                    card.UpdatePhotoFolder(doc.PhotoFolder);
+        }
+        await CheckDriveAsync();
     }
 
     /// <summary>사용법 창 열기</summary>

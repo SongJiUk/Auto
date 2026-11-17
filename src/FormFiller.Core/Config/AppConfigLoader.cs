@@ -63,7 +63,7 @@ public static class AppConfigLoader
             {
                 var    config = JsonSerializer.Deserialize<AppConfig>(json, ReadOptions);
                 if (config != null)
-                    return config;
+                    return RemapDrivePaths(config);
             }
             catch (JsonException ex)
             {
@@ -91,6 +91,32 @@ public static class AppConfigLoader
             File.WriteAllText(path, json, System.Text.Encoding.UTF8);
             _cachedJson = null;   // 다음 Load 때 새로 읽어 시각·크기를 다시 기억한다
         }
+    }
+
+    /// <summary>
+    /// 다른 PC 에서 고른 드라이브 폴더 경로(예: 회사 G:\내 드라이브\...)를 이 PC 경로(예: 집 H:\내 드라이브\...)로 바꾼다.
+    /// 경로가 이미 있으면 그대로 둔다. 저장할 때는 바뀐 경로가 저장되지만, 다른 PC 에서 읽을 때 다시 바뀌므로 문제없다.
+    /// </summary>
+    private static AppConfig RemapDrivePaths(AppConfig config)
+    {
+        if (Path.IsPathRooted(config.OutputFolder))
+            config.OutputFolder = GoogleDrive.Remap(config.OutputFolder);
+        foreach (var doc in config.Documents)
+            doc.PhotoFolder = GoogleDrive.Remap(doc.PhotoFolder);
+        return config;
+    }
+
+    /// <summary>
+    /// 고른 폴더를 설정에 저장할 모양으로 바꾼다. 프로그램 폴더 안이면 상대 경로(예: "output"), 밖이면 전체 경로.
+    /// </summary>
+    public static string ToStoredFolderPath(string folder)
+    {
+        if (string.IsNullOrWhiteSpace(folder)) return folder;
+        string baseDir = Path.GetFullPath(AppDomain.CurrentDomain.BaseDirectory);
+        string full    = Path.GetFullPath(folder);
+        return full.StartsWith(baseDir, StringComparison.OrdinalIgnoreCase)
+            ? Path.GetRelativePath(baseDir, full)
+            : full;
     }
 
     // ── 서식 경로 (두 PC 에서 같은 설정을 쓰기 위해) ───────────────────

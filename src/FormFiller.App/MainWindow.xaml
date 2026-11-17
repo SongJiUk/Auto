@@ -113,18 +113,20 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- ─── 헤더 ─────────────────────────────────────────────── -->
-        <Border Grid.Row="0" Background="#2B6CB0" Padding="16,10">
+        <!-- ─── 헤더 + 구글 드라이브 경고 띠 ─────────────────────── -->
+        <StackPanel Grid.Row="0">
+        <Border Background="#2B6CB0" Padding="16,10">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
                 <!-- 사용법 버튼 -->
-                <Button Grid.Column="3" Content="❓ 사용법" Click="OpenHelp_Click"
+                <Button Grid.Column="4" Content="❓ 사용법" Click="OpenHelp_Click"
                         Margin="8,0,0,0" VerticalAlignment="Center" Cursor="Hand">
                     <Button.Template>
                         <ControlTemplate TargetType="Button">
@@ -149,8 +151,27 @@
                                VerticalAlignment="Center" Text="공사일보 · 출력일보 · TBM일지"/>
                 </StackPanel>
 
+                <!-- 구글 드라이브 점검·폴더 설정 버튼 -->
+                <Button Grid.Column="1" Content="☁ 구글 드라이브" Click="OpenDrive_Click"
+                        Margin="0,0,8,0" VerticalAlignment="Center" Cursor="Hand">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="Bd" Background="Transparent" BorderBrush="#BEE3F8" BorderThickness="1"
+                                    CornerRadius="3" Padding="8,2">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                  TextElement.Foreground="White"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Bd" Property="Background" Value="#2C5282"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Button.Template>
+                </Button>
+
                 <!-- AI 도우미 버튼 -->
-                <Button Grid.Column="1"
+                <Button Grid.Column="2"
                         Content="🤖 AI 도우미"
                         Command="{Binding OpenAiAssistantCommand}"
                         Margin="0,0,8,0"
@@ -188,7 +209,7 @@
                 </Button>
 
                 <!-- 설정 버튼 -->
-                <Button Grid.Column="2"
+                <Button Grid.Column="3"
                         Content="⚙ 설정"
                         Click="OpenSettings_Click"
                         Background="Transparent" Foreground="White"
@@ -225,6 +246,13 @@
                 </Button>
             </Grid>
         </Border>
+
+        <!-- 시작할 때 드라이브 점검에서 중요한 문제가 있으면 보인다. 누르면 구글 드라이브 창 -->
+        <Border x:Name="DriveBanner" Visibility="Collapsed" Background="#FEEBC8" BorderBrush="#F6AD55"
+                BorderThickness="0,0,0,1" Padding="16,6" Cursor="Hand" MouseLeftButtonUp="DriveBanner_Click">
+            <TextBlock x:Name="DriveBannerText" Foreground="#7B341E" TextWrapping="Wrap"/>
+        </Border>
+        </StackPanel>
 
         <!-- ─── 본문: 왼쪽 단계 목록 + 오른쪽 고른 단계의 입력 ─────────── -->
         <Grid Grid.Row="1">
