@@ -12,5 +12,5 @@ if %errorlevel% neq 0 (
 )
 
 echo.
-echo 완료! publish\FormFiller.App.exe 에 생성되었습니다.
+echo 완료! publish\업무자동화.exe 에 생성되었습니다.
 pause
