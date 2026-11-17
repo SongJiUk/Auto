@@ -375,6 +375,17 @@
                                   SelectedItem="{Binding Weather, Mode=TwoWay}"/>
                     </Grid>
                 </GroupBox>
+
+                <!-- 폰 입력 (폰 앱이 드라이브 inbox 폴더에 올린 것을 화면에 합친다) -->
+                <GroupBox Header="폰 입력">
+                    <StackPanel Orientation="Horizontal">
+                        <Button Content="📱 폰 입력 불러오기" Padding="12,4"
+                                Command="{Binding LoadPhoneInputCommand}"
+                                Background="White" BorderBrush="#CBD5E0" Cursor="Hand"/>
+                        <TextBlock Text="{Binding PhoneStatusText}" Foreground="#2B6CB0" FontSize="12"
+                                   VerticalAlignment="Center" Margin="10,0,0,0" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </GroupBox>
                 </StackPanel>
 
                 <!-- ══════════════ 단계: 작업사항 ══════════════ -->

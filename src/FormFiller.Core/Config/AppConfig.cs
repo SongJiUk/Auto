@@ -41,6 +41,12 @@ public class AppConfig
 
     /// <summary>처음 실행할 때 사용법 창을 이미 보여 줬는지 (false 면 시작할 때 자동으로 연다)</summary>
     public bool HelpShown { get; set; } = false;
+
+    /// <summary>
+    /// 폰 앱이 입력을 올리는 드라이브 폴더. 비어 있으면 exe 폴더 옆의 FormFiller_inbox
+    /// (예: G:\내 드라이브\FormFiller_inbox). exe 기준 상대 경로나 절대 경로를 쓸 수 있다.
+    /// </summary>
+    public string PhoneInboxFolder { get; set; } = "";
 }
 
 /// <summary>
