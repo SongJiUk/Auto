@@ -140,9 +140,16 @@ public static class CellHelper
                                  .GetFirstChild<CalculationProperties>();
         if (calcPr == null)
         {
-            // CalculationProperties가 없으면 새로 추가
+            // CalculationProperties가 없으면 새로 추가.
+            // 통합문서 XML 은 요소 순서가 정해져 있어서(… sheets → definedNames → calcPr → … → extLst)
+            // 맨 끝에 붙이면 Excel 이 "파일 손상"으로 볼 수 있다. 앞에 와야 하는 요소 중 마지막 것 바로 뒤에 넣는다.
             calcPr = new CalculationProperties();
-            workbookPart.Workbook.Append(calcPr);
+            var wb = workbookPart.Workbook;
+            OpenXmlElement? before = wb.ChildElements.LastOrDefault(e =>
+                e is FileVersion or FileSharing or WorkbookProperties or WorkbookProtection or BookViews
+                  or Sheets or FunctionGroups or ExternalReferences or DefinedNames);
+            if (before != null) wb.InsertAfter(calcPr, before);
+            else wb.PrependChild(calcPr);
         }
         calcPr.FullCalculationOnLoad = true;
     }

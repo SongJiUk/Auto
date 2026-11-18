@@ -104,14 +104,19 @@ public static class GenericExcelWriter
         var eqField = dailyDoc.Fields.FirstOrDefault(f => f.Type == FieldTypes.EquipmentTable);
         if (eqField != null && !string.IsNullOrEmpty(eqField.NameCol) && !string.IsNullOrEmpty(eqField.TodayCol))
         {
+            var used = new HashSet<EquipmentEntry>();
             for (int row = eqField.StartRow; row <= eqField.EndRow; row++)
             {
                 string? cellName = CellHelper.GetCellValue(wsPart, $"{eqField.NameCol}{row}");
                 if (string.IsNullOrWhiteSpace(cellName)) continue;
+                string cellSpec = string.IsNullOrEmpty(eqField.SpecCol) ? ""
+                                : CellHelper.GetCellValue(wsPart, $"{eqField.SpecCol}{row}") ?? "";
 
-                var entry = input.Equipment
-                                 .FirstOrDefault(e => NormName(e.Name) == NormName(cellName));
-                if (entry == null) continue;
+                // 이름이 같은 장비가 여러 줄이면(예: 덤프 15m3 / 덤프 25t) 규격으로 가르고, 한 줄에 한 항목만 짝짓는다
+                int idx = FindRow(input.Equipment, e => (e.Name, e.Spec), cellName, cellSpec, i => used.Contains(input.Equipment[i]));
+                if (idx < 0) continue;
+                var entry = input.Equipment[idx];
+                used.Add(entry);
 
                 entry.PrevDayCount       = Cumulative(eqField.PrevDayCol, eqField.TodayCol, row);
                 entry.LastFileTodayCount = CellHelper.GetCellInt(wsPart, $"{eqField.TodayCol}{row}") ?? 0;
@@ -122,14 +127,17 @@ public static class GenericExcelWriter
         var pnField = dailyDoc.Fields.FirstOrDefault(f => f.Type == FieldTypes.PersonnelTable);
         if (pnField != null && !string.IsNullOrEmpty(pnField.RoleCol) && !string.IsNullOrEmpty(pnField.TodayCol))
         {
+            var people = input.GetPersonnelFor(includesSujangjae: true);   // 수장재 줄도 같은 표에 있을 수 있다
+            var used   = new HashSet<PersonnelEntry>();
             for (int row = pnField.StartRow; row <= pnField.EndRow; row++)
             {
                 string? cellRole = CellHelper.GetCellValue(wsPart, $"{pnField.RoleCol}{row}");
                 if (string.IsNullOrWhiteSpace(cellRole)) continue;
 
-                var entry = input.GetPersonnelFor(includesSujangjae: true)   // 수장재 줄도 같은 표에 있을 수 있다
-                                 .FirstOrDefault(p => NormName(p.Role) == NormName(cellRole));
-                if (entry == null) continue;
+                int idx = FindRow(people, p => (p.Role, ""), cellRole, "", i => used.Contains(people[i]));
+                if (idx < 0) continue;
+                var entry = people[idx];
+                used.Add(entry);
 
                 entry.PrevCumulativeCount = Cumulative(pnField.PrevCumulativeCol, pnField.TodayCol, row);
                 entry.LastFileTodayCount  = CellHelper.GetCellInt(wsPart, $"{pnField.TodayCol}{row}") ?? 0;
@@ -478,9 +486,8 @@ public static class GenericExcelWriter
             string? name = CellHelper.GetCellValue(ws, $"{keyCol}{row}");
             if (string.IsNullOrWhiteSpace(name)) { emptyRows.Add(row); continue; }
 
-            int idx = -1;
-            for (int i = 0; i < rows.Count; i++)
-                if (!used[i] && NormName(rows[i].Key) == NormName(name)) { idx = i; break; }
+            string spec = string.IsNullOrEmpty(specCol) ? "" : CellHelper.GetCellValue(ws, $"{specCol}{row}") ?? "";
+            int idx = FindRow(rows, r => (r.Key, r.Spec), name, spec, i => used[i]);
 
             if (idx >= 0)
             {
@@ -592,6 +599,26 @@ public static class GenericExcelWriter
             index /= 26;
         }
         return result;
+    }
+
+    /// <summary>
+    /// 표의 한 줄(이름·규격)에 짝지을 화면 항목을 찾는다. 이미 짝지은 항목은 건너뛴다.
+    /// 이름과 규격이 모두 같은 항목을 먼저, 없으면 이름만 같은 항목 중 첫 번째.
+    /// (같은 이름 장비가 여러 줄이어도 화면 순서와 상관없이 제 줄을 찾게 한다)
+    /// </summary>
+    private static int FindRow<T>(IReadOnlyList<T> items, Func<T, (string Name, string Spec)> key,
+                                  string name, string spec, Func<int, bool> isUsed)
+    {
+        int nameOnly = -1;
+        for (int i = 0; i < items.Count; i++)
+        {
+            if (isUsed(i)) continue;
+            var (n, sp) = key(items[i]);
+            if (NormName(n) != NormName(name)) continue;
+            if (NormName(sp) == NormName(spec)) return i;
+            if (nameOnly < 0) nameOnly = i;
+        }
+        return nameOnly;
     }
 
     /// <summary>
