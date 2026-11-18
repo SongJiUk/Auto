@@ -301,7 +301,7 @@ public static class BlockEngine
         var result = new Dictionary<string, BlockValue>();
         if (!File.Exists(filePath) || HwpxWriter.IsHwpx(filePath)) return result;
 
-        using var pkg = SpreadsheetDocument.Open(filePath, isEditable: false);
+        using var pkg = CellHelper.OpenReadOnly(filePath);
         string defaultSheet = sheet ?? doc.TargetSheets().FirstOrDefault() ?? "";
 
         foreach (var f in doc.Fields.Where(f => BlockTypes.IsBlock(f.Type)))

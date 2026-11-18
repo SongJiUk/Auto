@@ -26,6 +26,9 @@ public interface IExcelBridge
 
     /// <summary>항목을 누르면 Excel 에서 해당 칸/그림을 선택해 보여 준다.</summary>
     void Reveal(string? cell, IEnumerable<int>? shapeIndexes);
+
+    /// <summary>지금 시트의 (행, 열) 칸에 보이는 글자 (머리글 자동 인식용). 1부터.</summary>
+    string GetCellText(int row, int col);
 }
 
 /// <summary>Excel 선택 상태</summary>
@@ -36,8 +39,9 @@ public interface IExcelBridge
 /// <param name="RowCount">선택 범위 행 수</param>
 /// <param name="ShapeNames">선택된 그림·글상자 이름들</param>
 /// <param name="ShapeIndexes">선택된 그림·글상자의 시트 안 순서 (0부터)</param>
+/// <param name="ColCount">선택 범위 열 수 (표 머리글 자동 인식에 쓴다)</param>
 public record ExcelSelection(bool IsShapes, string ActiveCell, int Row, int Col, int RowCount,
-                             List<string> ShapeNames, List<int> ShapeIndexes)
+                             List<string> ShapeNames, List<int> ShapeIndexes, int ColCount = 1)
 {
     /// <summary>선택이 바뀌었는지 비교하는 용도</summary>
     public string Signature => IsShapes ? "S:" + string.Join(",", ShapeNames) : $"R:{ActiveCell}:{Row}:{Col}:{RowCount}";
@@ -220,12 +224,88 @@ public class SetupItemViewModel : ViewModelBase
 
     private string _sourcesText = "";
     /// <summary>계산에 쓸 항목 이름들 (쉼표로)</summary>
-    public string SourcesText { get => _sourcesText; set { if (SetField(ref _sourcesText, value)) Changed(); } }
+    public string SourcesText { get => _sourcesText; set { if (SetField(ref _sourcesText, value)) { Changed(); RebuildSourceChoices(); } } }
+
+    /// <summary>계산에 쓸 항목: 이름을 타이핑하지 않고 체크해서 고른다 (오타 방지)</summary>
+    public ObservableCollection<KeyChoice> SourceChoices { get; } = [];
+
+    private List<string> SourceList() =>
+        _sourcesText.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(x => x.Trim()).Where(x => x.Length > 0).ToList();
+
+    private void RebuildSourceChoices()
+    {
+        if (!IsCalc) return;
+        var current = SourceList();
+        var known = OtherKeys;
+        SourceChoices.Clear();
+        foreach (var k in known) SourceChoices.Add(new KeyChoice(k, current.Contains(k), missing: false, OnSourceToggled));
+        foreach (var k in current.Where(c => !known.Contains(c)))   // 지금은 없는 이름 (오타·지운 항목)
+            SourceChoices.Add(new KeyChoice(k, true, missing: true, OnSourceToggled));
+    }
+
+    private void OnSourceToggled()
+    {
+        _sourcesText = string.Join(", ", SourceChoices.Where(c => c.IsChecked).Select(c => c.Key));
+        OnPropertyChanged(nameof(SourcesText));
+        Changed();
+    }
+
+    // ── 머리글 자동 인식 안내 ────────────────────────────────────────
+    private string _autoNote = "";
+    /// <summary>표·명단 행을 드래그했을 때 머리글에서 찾은 열 (예: "머리글에서 찾음: 이름 A · 금일 H")</summary>
+    public string AutoNote { get => _autoNote; set { if (SetField(ref _autoNote, value)) OnPropertyChanged(nameof(HasAutoNote)); } }
+    public bool HasAutoNote => _autoNote.Length > 0;
+
+    // ── 짝짓기 표 (표의 줄 ↔ 명단 직종) ─────────────────────────────
+    public ObservableCollection<RoleMapRow> RoleMapRows { get; } = [];
+    public bool HasRoleMapRows => RoleMapRows.Count > 0;
+    public bool HasRosterKey => !string.IsNullOrWhiteSpace(_rosterKey);
+    public ICommand LoadRoleMapCommand { get; private set; } = null!;
+
+    /// <summary>
+    /// 짝짓기 표를 만든다. 줄마다 직종 체크박스. 이미 정한 짝짓기가 있으면 그대로, 없으면 줄 이름과 같은 직종만 체크.
+    /// </summary>
+    public void SetRoleMapData(IEnumerable<string> rowNames, IEnumerable<string> jobs)
+    {
+        var map = ParseRoleMap(_roleMapText) ?? [];
+        var jobList = jobs.Select(j => j.Trim()).Where(j => j.Length > 0).Distinct().ToList();
+        RoleMapRows.Clear();
+        foreach (var row in rowNames.Select(r => r.Trim()).Where(r => r.Length > 0).Distinct())
+        {
+            var picked = map.TryGetValue(row, out var m) ? m : jobList.Where(j => j == row).ToList();
+            var all = jobList.Union(picked).ToList();
+            RoleMapRows.Add(new RoleMapRow(row, all.Select(j => new KeyChoice(j, picked.Contains(j), false, OnRoleMapToggled))));
+        }
+        OnPropertyChanged(nameof(HasRoleMapRows));
+    }
+
+    private void OnRoleMapToggled()
+    {
+        // 기본(줄 이름과 같은 직종 하나)과 다른 줄만 저장해 글자를 짧게
+        var map = new Dictionary<string, List<string>>();
+        foreach (var r in RoleMapRows)
+        {
+            var picked = r.Jobs.Where(j => j.IsChecked).Select(j => j.Key).ToList();
+            if (picked.Count > 0 && !(picked.Count == 1 && picked[0] == r.RowName)) map[r.RowName] = picked;
+        }
+        _roleMapText = FormatRoleMap(map.Count == 0 ? null : map);
+        OnPropertyChanged(nameof(RoleMapText));
+    }
     public string KnownKeysText => "쓸 수 있는 이름: " + string.Join(", ", _host.KnownKeys().Where(k => k != EffectiveKey));
 
     private string _rosterKey = "";
     /// <summary>표: 금일을 셀 명단 이름 (비우면 화면에서 입력)</summary>
-    public string RosterKey { get => _rosterKey; set => SetField(ref _rosterKey, value); }
+    public string RosterKey
+    {
+        get => _rosterKey;
+        set
+        {
+            if (!SetField(ref _rosterKey, value)) return;
+            OnPropertyChanged(nameof(HasRosterKey));
+            // 아는 명단 이름을 고르면 짝짓기 표를 바로 채운다
+            if (StartRow > 0 && _host.KnownKeys().Contains(value.Trim())) _host.LoadRoleMap(this);
+        }
+    }
 
     private string _roleMapText = "";
     /// <summary>표: 줄 이름 ↔ 명단 직종 짝짓기. 예) "관리자 = 소장, 차장, 대리 / 장비 = 장비"</summary>
@@ -339,6 +419,7 @@ public class SetupItemViewModel : ViewModelBase
         RemoveCommand     = new RelayCommand(_ => _host.RemoveItem(this));
         RevealCommand     = new RelayCommand(_ => _host.RevealItem(this));
         SavePresetCommand = new RelayCommand(_ => _host.SavePreset(this));
+        LoadRoleMapCommand = new RelayCommand(_ => _host.LoadRoleMap(this));
     }
 
     /// <summary>이 항목을 처음 지정할 때 Excel 에서 무엇을 골라야 하는지</summary>
@@ -393,6 +474,7 @@ public class SetupItemViewModel : ViewModelBase
         OnPropertyChanged(nameof(StartFromChoices));
         OnPropertyChanged(nameof(KnownKeysText));
         OnPropertyChanged(nameof(OtherKeys));
+        RebuildSourceChoices();
     }
 
     private static string Join(params string?[] parts) => string.Join(" · ", parts.Where(p => !string.IsNullOrEmpty(p)));
@@ -556,11 +638,39 @@ public interface ISetupHost
     bool IsHwpx { get; }
     /// <summary>이 문서와 다른 문서들에 있는 블록 값 이름 (처음 값·계산 고르기용)</summary>
     IReadOnlyList<string> KnownKeys();
+    /// <summary>표의 줄 이름과 명단 직종을 서식에서 읽어 짝짓기 표를 채운다</summary>
+    void LoadRoleMap(SetupItemViewModel item);
     void StartPick(SetupItemViewModel item, PickKind kind, string? columnKey = null);
     void RemoveItem(SetupItemViewModel item);
     void RevealItem(SetupItemViewModel item);
     void SavePreset(SetupItemViewModel item);
     void ShowPreset(ShapePreset preset);
+}
+
+/// <summary>체크해서 고르는 이름 하나 (계산에 쓸 항목, 짝짓기 직종)</summary>
+public class KeyChoice : ViewModelBase
+{
+    private readonly Action _onToggled;
+    public string Key { get; }
+    /// <summary>지금은 없는 이름 (오타이거나 지운 항목) — 빨간 글씨</summary>
+    public bool IsMissing { get; }
+    public string Display => IsMissing ? $"{Key} (없음)" : Key;
+
+    private bool _isChecked;
+    public bool IsChecked { get => _isChecked; set { if (SetField(ref _isChecked, value)) _onToggled(); } }
+
+    public KeyChoice(string key, bool isChecked, bool missing, Action onToggled)
+    {
+        Key = key; _isChecked = isChecked; IsMissing = missing; _onToggled = onToggled;
+    }
+}
+
+/// <summary>짝짓기 표의 한 줄: 표의 줄 이름 ← 셀 명단 직종들</summary>
+public class RoleMapRow
+{
+    public string RowName { get; }
+    public ObservableCollection<KeyChoice> Jobs { get; }
+    public RoleMapRow(string rowName, IEnumerable<KeyChoice> jobs) { RowName = rowName; Jobs = new(jobs); }
 }
 
 /// <summary>표 카드의 열 지정 버튼 하나</summary>

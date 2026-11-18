@@ -158,6 +158,10 @@
                         </ItemsControl>
                     </WrapPanel>
 
+                    <!-- 표·명단: 머리글에서 자동으로 찾은 열 -->
+                    <TextBlock Text="{Binding AutoNote}" Margin="22,4,0,0" FontSize="11" Foreground="#276749" TextWrapping="Wrap"
+                               Visibility="{Binding HasAutoNote, Converter={StaticResource BoolVis}}"/>
+
                     <!-- 단위 · 시각 -->
                     <WrapPanel Margin="22,4,0,0" Visibility="{Binding HasSuffix, Converter={StaticResource BoolVis}}">
                         <TextBlock Text="단위" Style="{StaticResource LabelStyle}" FontSize="11"/>
@@ -236,12 +240,52 @@
                             </DockPanel>
                             <TextBlock Text="↑ 비우면 직접 입력 / 명단 이름을 적으면 직종별로 자동으로 셉니다" FontSize="10"
                                        Foreground="#A0AEC0" Margin="62,0,0,4"/>
-                            <DockPanel Margin="0,0,0,4">
-                                <TextBlock Text="짝짓기" Style="{StaticResource LabelStyle}" FontSize="11" Width="62"/>
-                                <TextBox Text="{Binding RoleMapText, UpdateSourceTrigger=PropertyChanged}" FontSize="11" Padding="3,1"
-                                         ToolTip="표의 줄 이름 = 셀 직종들. 예) 관리자 = 소장, 차장, 대리 / 장비 = 장비. 없으면 줄 이름과 같은 직종을 셉니다"/>
-                            </DockPanel>
-                            <TextBlock Text="예) 관리자 = 소장, 차장, 대리 / 장비 = 장비" FontSize="10" Foreground="#A0AEC0" Margin="62,0,0,4"/>
+                            <!-- 짝짓기: 표의 줄마다 셀 명단 직종을 체크 (예: 관리자 ← 소장·차장·대리) -->
+                            <StackPanel Visibility="{Binding HasRosterKey, Converter={StaticResource BoolVis}}">
+                                <DockPanel Margin="0,2,0,4">
+                                    <Button DockPanel.Dock="Right" Content="↻ 짝짓기 표 불러오기" Command="{Binding LoadRoleMapCommand}"
+                                            Style="{StaticResource SmallBtn}"/>
+                                    <TextBlock Text="짝짓기 — 줄마다 셀 직종을 체크" FontSize="11" Foreground="#4A5568" VerticalAlignment="Center"/>
+                                </DockPanel>
+                                <ItemsControl ItemsSource="{Binding RoleMapRows}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate DataType="{x:Type vm:RoleMapRow}">
+                                            <DockPanel Margin="0,0,0,3">
+                                                <TextBlock DockPanel.Dock="Left" Text="{Binding RowName}" Width="70" FontSize="11"
+                                                           FontWeight="SemiBold" VerticalAlignment="Top" Margin="0,2,4,0"
+                                                           TextTrimming="CharacterEllipsis" ToolTip="{Binding RowName}"/>
+                                                <ItemsControl ItemsSource="{Binding Jobs}">
+                                                    <ItemsControl.ItemsPanel>
+                                                        <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
+                                                    </ItemsControl.ItemsPanel>
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate DataType="{x:Type vm:KeyChoice}">
+                                                            <CheckBox Content="{Binding Display}" IsChecked="{Binding IsChecked}"
+                                                                      FontSize="11" Margin="0,1,8,1"/>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                            </DockPanel>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <!-- 표를 못 불러왔을 때는 글자로 적는다 -->
+                                <StackPanel>
+                                    <StackPanel.Style>
+                                        <Style TargetType="StackPanel">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding HasRoleMapRows}" Value="True">
+                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </StackPanel.Style>
+                                    <TextBox Text="{Binding RoleMapText, UpdateSourceTrigger=PropertyChanged}" FontSize="11" Padding="3,1"
+                                             ToolTip="표의 줄 이름 = 셀 직종들. 예) 관리자 = 소장, 차장, 대리 / 장비 = 장비"/>
+                                    <TextBlock Text="표의 행을 지정하면 체크 표로 바뀝니다. 예) 관리자 = 소장, 차장, 대리" FontSize="10"
+                                               Foreground="#A0AEC0" Margin="0,2,0,4"/>
+                                </StackPanel>
+                            </StackPanel>
                         </StackPanel>
 
                         <!-- 계산 -->
@@ -250,12 +294,31 @@
                                 <TextBlock Text="계산" Style="{StaticResource LabelStyle}" FontSize="11" Width="62"/>
                                 <ComboBox ItemsSource="{Binding CalcKinds}" SelectedItem="{Binding CalcKind}" FontSize="11"/>
                             </DockPanel>
-                            <DockPanel Margin="0,0,0,2">
-                                <TextBlock Text="쓸 항목" Style="{StaticResource LabelStyle}" FontSize="11" Width="62"/>
-                                <TextBox Text="{Binding SourcesText, UpdateSourceTrigger=PropertyChanged}" FontSize="11" Padding="3,1"
-                                         ToolTip="항목 이름을 쉼표로 (예: 인원, 수장재 인원)"/>
+                            <DockPanel Margin="0,0,0,4">
+                                <TextBlock Text="쓸 항목" Style="{StaticResource LabelStyle}" FontSize="11" Width="62" VerticalAlignment="Top"/>
+                                <ItemsControl ItemsSource="{Binding SourceChoices}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate DataType="{x:Type vm:KeyChoice}">
+                                            <CheckBox Content="{Binding Display}" IsChecked="{Binding IsChecked}" FontSize="11" Margin="0,1,10,1">
+                                                <CheckBox.Style>
+                                                    <Style TargetType="CheckBox">
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsMissing}" Value="True">
+                                                                <Setter Property="Foreground" Value="#E53E3E"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </CheckBox.Style>
+                                            </CheckBox>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
                             </DockPanel>
-                            <TextBlock Text="{Binding KnownKeysText}" FontSize="10" Foreground="#A0AEC0" TextWrapping="Wrap" Margin="62,0,0,4"/>
+                            <TextBlock Text="다른 항목을 먼저 만들면 여기에 나옵니다 (다른 문서의 항목도)." FontSize="10"
+                                       Foreground="#A0AEC0" TextWrapping="Wrap" Margin="62,0,0,4"/>
                         </StackPanel>
                     </StackPanel>
 

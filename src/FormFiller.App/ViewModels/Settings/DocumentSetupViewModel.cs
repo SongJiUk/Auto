@@ -313,6 +313,68 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
 
     private readonly HashSet<string> _skippedCols = [];
 
+    /// <summary>
+    /// 표·명단: 드래그한 행 위의 머리글(장비명·전일·금일·누계 / 직종·성명·작업내용)을 읽어 열 역할을 채운다.
+    /// 찾은 게 있으면 못 찾은 "선택" 열은 묻지 않는다 (필수 열만 클릭). 다르면 카드의 열 버튼으로 다시 지정.
+    /// </summary>
+    private void AutoDetectColumns(SetupItemViewModel item, ExcelSelection sel)
+    {
+        if (Bridge == null || item.Type is not (BlockTypes.Table or BlockTypes.Roster)) return;
+        Dictionary<string, string> found;
+        try { found = HeaderDetector.Detect(item.Type, sel.Row, sel.Col, sel.Col + Math.Max(1, sel.ColCount) - 1, Bridge.GetCellText); }
+        catch (Exception ex) { AppLog.Error("머리글 인식 실패", ex); return; }
+
+        if (found.Count == 0) { item.AutoNote = ""; return; }
+        foreach (var (role, col) in found) item.SetColumn(role, col);
+        foreach (var k in item.ColKeys.Where(k => !found.ContainsKey(k) && item.IsOptionalCol(k))) _skippedCols.Add(k);
+        item.AutoNote = "머리글에서 찾음: " + string.Join(" · ", item.ColKeys.Where(found.ContainsKey)
+                            .Select(k => $"{SetupItemViewModel.ColTitle(k)} {found[k]}"))
+                      + "  (다르면 아래 열 버튼을 눌러 다시 지정)";
+        if (item.IsTable && item.HasRosterKey) LoadRoleMap(item);
+    }
+
+    /// <summary>
+    /// 짝짓기 표: 표의 줄 이름(서식의 그 표)과 명단 직종(이 문서·다른 문서의 명단 + 저장된 사람 목록)을 읽는다.
+    /// Excel 이 서식을 열고 있어도 읽을 수 있게 읽기 전용 복사로 연다.
+    /// </summary>
+    public void LoadRoleMap(SetupItemViewModel item)
+    {
+        if (!HasFile || IsHwpx || !item.IsTable || !item.HasRosterKey || item.StartRow == 0) return;
+        try
+        {
+            string defaultSheet = SheetChoices.FirstOrDefault(c => c.IsChecked)?.Name ?? SelectedSheet ?? "";
+            var rows = ReadBlock(_filePath, item.ToConfig(), defaultSheet).Rows.Select(r => r.Name).ToList();
+
+            string rosterKey = item.RosterKey.Trim();
+            var jobs = new List<string>();
+            var rosterItem = Items.FirstOrDefault(i => i.Type == BlockTypes.Roster && i.EffectiveKey == rosterKey);
+            if (rosterItem != null)
+                jobs.AddRange(ReadBlock(_filePath, rosterItem.ToConfig(), defaultSheet).People.Select(p => p.Job));
+            var cfg = AppConfigLoader.Load();
+            foreach (var doc in cfg.Documents.Where(d => d.Id != _editing?.Id))
+                foreach (var f in doc.Fields.Where(f => f.Type == BlockTypes.Roster && BlockTypes.KeyOf(f) == rosterKey))
+                {
+                    string path = AppConfigLoader.ResolvePath(doc.TemplateFile);
+                    if (File.Exists(path)) jobs.AddRange(ReadBlock(path, f, doc.TargetSheets().FirstOrDefault() ?? "").People.Select(p => p.Job));
+                }
+            jobs.AddRange(cfg.People.Select(p => p.Role));
+            jobs.AddRange(rows);   // 줄 이름과 같은 직종도 고를 수 있게
+
+            item.SetRoleMapData(rows, jobs);
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("짝짓기 표 읽기 실패", ex);
+            Warn($"짝짓기 표를 만들지 못했습니다: {ex.Message}");
+        }
+    }
+
+    private static Core.Models.BlockValue ReadBlock(string file, FieldConfig f, string sheet)
+    {
+        var doc = new DocumentConfig { SheetName = sheet, Fields = [f] };
+        return BlockEngine.ReadValues(file, doc, sheet).TryGetValue(BlockTypes.KeyOf(f), out var v) ? v : new();
+    }
+
     // ════════════════════════════════════════════════════════════════
     // ── 기존 문서 불러오기 (편집) ─────────────────────────────────
     // ════════════════════════════════════════════════════════════════
@@ -650,6 +712,7 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
                 item.SetRows(sel.Row, sel.Row + sel.RowCount - 1);
                 RecordSheet(item);
                 _skippedCols.Clear();
+                AutoDetectColumns(item, sel);
                 break;
 
             case PickKind.Lines:

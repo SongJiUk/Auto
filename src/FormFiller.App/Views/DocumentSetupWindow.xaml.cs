@@ -226,7 +226,18 @@ public partial class DocumentSetupWindow : Window, IExcelBridge
         catch { /* 칸 선택 */ }
 
         return new ExcelSelection(false, (string)_xl.ActiveCell.Address(false, false),
-                                  (int)sel.Row, (int)sel.Column, (int)sel.Rows.Count, [], []);
+                                  (int)sel.Row, (int)sel.Column, (int)sel.Rows.Count, [], [], (int)sel.Columns.Count);
+    }
+
+    /// <summary>지금 시트 칸에 보이는 글자 (병합 칸은 왼쪽 위 칸에 글자가 있다)</summary>
+    public string GetCellText(int row, int col)
+    {
+        try
+        {
+            dynamic ws = _xl!.ActiveSheet;
+            return (string)(ws.Cells[row, col].Text ?? "");
+        }
+        catch { return ""; }
     }
 
     /// <summary>시트 안 순서(0부터)로 그림·글상자를 찾는다.</summary>

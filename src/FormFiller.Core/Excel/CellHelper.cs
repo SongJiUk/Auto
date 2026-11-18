@@ -148,6 +148,19 @@ public static class CellHelper
                                 System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : null;
     }
 
+    /// <summary>
+    /// 읽기 전용으로 연다. Excel 이 그 파일을 열고 있어도 읽을 수 있게(FileShare.ReadWrite) 메모리로 복사해서 연다.
+    /// (보통 Open(path, false) 는 다른 프로그램이 쓰기로 연 파일이면 "다른 프로세스가 사용 중" 오류가 난다)
+    /// </summary>
+    public static SpreadsheetDocument OpenReadOnly(string path)
+    {
+        var ms = new MemoryStream();
+        using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+            fs.CopyTo(ms);
+        ms.Position = 0;
+        return SpreadsheetDocument.Open(ms, isEditable: false);
+    }
+
     // ── fullCalcOnLoad 설정 ───────────────────────────────────────────
 
     /// <summary>

@@ -55,7 +55,7 @@ public static class GenericExcelWriter
         var roles = new List<string>();
         if (!File.Exists(filePath)) return (eq, roles);
 
-        using var doc  = SpreadsheetDocument.Open(filePath, isEditable: false);
+        using var doc  = CellHelper.OpenReadOnly(filePath);
         var       ws   = CellHelper.FindWorksheetPart(doc.WorkbookPart!, dailyDoc.SheetName);
         if (ws == null) return (eq, roles);
 
@@ -85,7 +85,7 @@ public static class GenericExcelWriter
     {
         if (!File.Exists(prevFilePath)) return;
 
-        using var doc   = SpreadsheetDocument.Open(prevFilePath, isEditable: false);
+        using var doc   = CellHelper.OpenReadOnly(prevFilePath);
         var       wbPart = doc.WorkbookPart!;
         var       wsPart = CellHelper.FindWorksheetPart(wbPart, dailyDoc.SheetName);
         if (wsPart == null) return;
