@@ -109,7 +109,8 @@ public static class CellHelper
         }
         else
         {
-            // 인라인 문자열(t="str")로 저장
+            // 인라인 문자열(t="str")로 저장. 칸 안 글자(<is>)가 남아 있으면 지운다 (두 값이 함께 있으면 구조 오류)
+            cell.InlineString?.Remove();
             cell.DataType  = CellValues.String;
             cell.CellValue = new CellValue(value);
         }
@@ -124,6 +125,7 @@ public static class CellHelper
     public static void SetCellInt(WorksheetPart wsPart, string cellAddress, int value)
     {
         var cell = GetOrCreateCell(wsPart.Worksheet, cellAddress);
+        cell.InlineString?.Remove();                        // 글자 칸이었으면 남은 글자를 지운다
         cell.DataType  = null;                              // 숫자는 DataType 없음
         cell.CellValue = new CellValue(value.ToString());
     }
@@ -276,6 +278,10 @@ public static class CellHelper
     /// </summary>
     private static string? ResolveCellValue(SpreadsheetDocument? doc, Cell cell)
     {
+        // t="inlineStr": 글자를 칸 안(<is>)에 직접 넣는 방식. Excel 은 잘 안 쓰지만 다른 프로그램(openpyxl 등)이 쓴다
+        if (cell.DataType?.Value == CellValues.InlineString)
+            return cell.InlineString?.InnerText ?? cell.CellValue?.Text;
+
         string? raw = cell.CellValue?.Text;
         if (raw == null) return null;
 
