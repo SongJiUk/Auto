@@ -157,7 +157,8 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
             {
                 // 이름을 아직 안 적었으면 종류 이름으로 채워 준다
                 if (string.IsNullOrWhiteSpace(NewItemLabel) || ItemTypeOption.All.Any(o => o.Label == NewItemLabel))
-                    NewItemLabel = value.FixedId != null || value.Type is FieldTypes.DateKorean or FieldTypes.DateSimple
+                    NewItemLabel = value.Type == BlockTypes.Date ? "날짜"
+                        : value.FixedId != null || value.Type is FieldTypes.DateKorean or FieldTypes.DateSimple
                         ? value.Label.Split(' ')[0] : "";
             }
         }
@@ -191,7 +192,8 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
     public bool PickNeedsConfirm => _pickKind is PickKind.Shapes or PickKind.Rows or PickKind.Lines;
 
     /// <summary>사진 옆 측정값 칸처럼 없을 수도 있는 단계는 [건너뛰기]</summary>
-    public bool PickCanSkip => _pickKind == PickKind.ValueCell;
+    public bool PickCanSkip => _pickKind is PickKind.ValueCell or PickKind.PrevCell
+                            || (_pickKind == PickKind.Column && _pickItem != null && _pickItem.IsOptionalCol(_pickColumn ?? ""));
 
     private string _pickPrompt = "";
     public string PickPrompt { get => _pickPrompt; private set => SetField(ref _pickPrompt, value); }
@@ -234,12 +236,82 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
         CancelAddItemCommand  = new RelayCommand(_ => ShowAddPanel = false);
 
         ConfirmPickCommand = new RelayCommand(_ => ConfirmPick());
-        SkipPickCommand    = new RelayCommand(_ => NextPickStep());
+        SkipPickCommand    = new RelayCommand(_ =>
+        {
+            if (_pickKind == PickKind.Column && _pickColumn != null) _skippedCols.Add(_pickColumn);
+            if (_pickKind == PickKind.PrevCell) _pickItem?.SetPrevSkipped();
+            NextPickStep();
+        });
+        ConvertToBlocksCommand = new RelayCommand(_ => ConvertToBlocks(), _ => HasLegacyItems);
         CancelPickCommand  = new RelayCommand(_ => CancelPick());
         ScanPlaceholdersCommand = new RelayCommand(_ => ScanPlaceholders(showMessage: true));
 
-        Items.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasNoItems));
+        Items.CollectionChanged += (_, e) =>
+        {
+            OnPropertyChanged(nameof(HasNoItems));
+            OnPropertyChanged(nameof(HasLegacyItems));
+            if (e.NewItems != null)
+                foreach (SetupItemViewModel it in e.NewItems)
+                    it.PropertyChanged += (_, pe) => { if (pe.PropertyName is nameof(SetupItemViewModel.Key) or nameof(SetupItemViewModel.Label)) RefreshKnownKeys(); };
+            RefreshKnownKeys();
+        };
     }
+
+    // ════════════════════════════════════════════════════════════════
+    // ── 블록 값 이름 / 예전 방식 바꾸기 ───────────────────────────
+    // ════════════════════════════════════════════════════════════════
+
+    private List<string>? _otherDocKeys;
+
+    /// <summary>다른 문서들의 블록 이름 + 이 문서 블록 이름 (처음 값·계산·명단 고르기용)</summary>
+    public IReadOnlyList<string> KnownKeys()
+    {
+        _otherDocKeys ??= AppConfigLoader.Load().Documents
+            .Where(d => d.Id != _editing?.Id)
+            .SelectMany(d => d.Fields.Where(f => BlockTypes.IsBlock(f.Type) && f.Type != BlockTypes.Date).Select(BlockTypes.KeyOf))
+            .ToList();
+        return Items.Where(i => i.HasKey).Select(i => i.EffectiveKey).Concat(_otherDocKeys)
+                    .Where(k => k.Length > 0).Distinct().ToList();
+    }
+
+    private void RefreshKnownKeys()
+    {
+        foreach (var i in Items) i.RefreshKnownKeys();
+    }
+
+    /// <summary>예전 방식 항목(날씨·장비 표 등 뜻이 코드에 정해진 것)이 있는지</summary>
+    public bool HasLegacyItems => Items.Any(i => i.IsLegacy);
+
+    public ICommand ConvertToBlocksCommand { get; }
+
+    /// <summary>
+    /// [블록 방식으로 바꾸기]: 예전 항목을 같은 칸·같은 결과의 블록으로 바꾼다 (저장해야 반영).
+    /// 바꾼 뒤에는 규칙(값 이름, 처음 값, 계산 등)을 카드에서 바꿀 수 있다.
+    /// </summary>
+    private void ConvertToBlocks()
+    {
+        var fields = Items.Select(i => i.ToConfig()).ToList();
+        var converted = BlockMigration.Convert(new DocumentConfig { Fields = fields });
+        CancelPick();
+        Items.Clear();
+        foreach (var f in converted) Items.Add(SetupItemViewModel.FromConfig(this, f));
+        MessageBox.Show("예전 방식 항목을 블록으로 바꿨습니다. 칸 위치와 결과는 같습니다.\n" +
+                        "카드에서 규칙을 확인하고 [저장]을 누르세요.", "블록 방식으로 바꾸기",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    /// <summary>
+    /// 지정한 시트가 "적용할 시트" 가 아니면 항목에 그 시트를 기록한다 (그 시트에만 쓰게).
+    /// 적용할 시트에서 지정하면 비워 둔다 → 적용할 시트 전부에 쓴다.
+    /// </summary>
+    private void RecordSheet(SetupItemViewModel item)
+    {
+        string current = SelectedSheet ?? "";
+        bool isTarget = SheetChoices.Any(c => c.IsChecked && c.Name == current);
+        item.Sheet = isTarget || current.Length == 0 ? null : current;
+    }
+
+    private readonly HashSet<string> _skippedCols = [];
 
     // ════════════════════════════════════════════════════════════════
     // ── 기존 문서 불러오기 (편집) ─────────────────────────────────
@@ -374,7 +446,9 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
         foreach (var ph in found.Where(ph => Items.All(i => i.Placeholder != ph)))
         {
             string label = ph.Trim('{', '}').Trim();
-            var item = new SetupItemViewModel(this, MakeId(label), label, GuessTypeForLabel(label)) { Placeholder = ph };
+            string type = GuessTypeForLabel(label);
+            var item = new SetupItemViewModel(this, MakeId(label), label, type) { Placeholder = ph };
+            if (type == BlockTypes.Date) item.DateFormat = "{yyyy}.{MM}.{dd}";
             Items.Add(item);
             added++;
         }
@@ -386,11 +460,9 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
                 "한글 서식", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
-    /// <summary>자리 이름으로 종류 추측 (날짜·날씨·작업사항). 나머지는 매일 입력.</summary>
+    /// <summary>자리 이름으로 종류 추측: 날짜·일자 → 날짜, 나머지 → 값(매일 입력). 카드에서 바꿀 수 있다.</summary>
     private static string GuessTypeForLabel(string label) =>
-        label.Contains("날짜") || label.Contains("일자") ? FieldTypes.DateSimple
-        : label.Contains("날씨") ? FieldTypes.Text
-        : FieldTypes.Input;
+        label.Contains("날짜") || label.Contains("일자") ? BlockTypes.Date : BlockTypes.Value;
 
     // ════════════════════════════════════════════════════════════════
     // ── 항목 추가 / 삭제 ──────────────────────────────────────────
@@ -455,8 +527,9 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
     {
         if (IsPicking || Bridge == null) return;
         Bridge.Reveal(item.Type == FieldTypes.Photo ? item.Cell
-                      : item.Type == FieldTypes.Multiline ? item.Cells.FirstOrDefault()
-                      : item.Cell,
+                      : item.Type is FieldTypes.Multiline or BlockTypes.Lines ? item.Cells.FirstOrDefault()
+                      : item.StartRow > 0 ? $"{item.ColKeys.Select(item.ColOf).FirstOrDefault(c => c != null) ?? "A"}{item.StartRow}"
+                      : item.Cell ?? item.TotalCell,
                       item.Type == FieldTypes.ShapePosition ? item.ShapeIndexes : null);
     }
 
@@ -485,7 +558,10 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
             PickKind.Shapes    => $"「{item.Label}」 함께 옮길 그림·글상자를 클릭하세요. 여러 개면 Ctrl 을 누른 채 클릭한 뒤 [확인].",
             PickKind.Rows      => $"「{item.Label}」 표에서 값이 들어가는 행들을 위에서 아래로 드래그한 뒤 [확인].",
             PickKind.Lines     => $"「{item.Label}」 한 줄씩 들어갈 칸들을 위에서 아래로 드래그한 뒤 [확인].",
-            PickKind.Column    => $"「{item.Label}」 {SetupItemViewModel.ColTitle(columnKey ?? "")} 열의 아무 칸이나 클릭하세요.",
+            PickKind.Column    => $"「{item.Label}」 {SetupItemViewModel.ColTitle(columnKey ?? "")} 열의 아무 칸이나 클릭하세요."
+                                  + (item.IsOptionalCol(columnKey ?? "") ? " 없으면 [건너뛰기]." : ""),
+            PickKind.TotalCell => $"「{item.Label}」 누계 칸을 클릭하세요 (누계 = 어제 누계 + 오늘).",
+            PickKind.PrevCell  => $"「{item.Label}」 전일(어제까지 누계) 칸이 따로 있으면 클릭하세요. 없으면 [건너뛰기].",
             _ => "",
         };
 
@@ -522,6 +598,18 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
         {
             case PickKind.Cell when !sel.IsShapes:
                 item.Cell = sel.ActiveCell;
+                RecordSheet(item);
+                NextPickStep();
+                break;
+
+            case PickKind.TotalCell when !sel.IsShapes:
+                item.TotalCell = sel.ActiveCell;
+                RecordSheet(item);
+                NextPickStep();
+                break;
+
+            case PickKind.PrevCell when !sel.IsShapes:
+                item.PrevCell = sel.ActiveCell;
                 NextPickStep();
                 break;
 
@@ -537,6 +625,7 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
 
             case PickKind.Picture when sel.IsShapes && sel.ShapeNames.Count == 1:
                 item.Cell = sel.ActiveCell;
+                RecordSheet(item);
                 NextPickStep();
                 break;
         }
@@ -559,12 +648,15 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
             case PickKind.Rows:
                 if (sel.IsShapes) { Warn("표의 칸들을 드래그해 선택하세요."); return; }
                 item.SetRows(sel.Row, sel.Row + sel.RowCount - 1);
+                RecordSheet(item);
+                _skippedCols.Clear();
                 break;
 
             case PickKind.Lines:
                 if (sel.IsShapes) { Warn("칸들을 드래그해 선택하세요."); return; }
                 string col = new(sel.ActiveCell.TakeWhile(char.IsLetter).ToArray());
                 item.SetLines(Enumerable.Range(sel.Row, sel.RowCount).Select(r => $"{col}{r}").ToList());
+                RecordSheet(item);
                 break;
 
             default:
@@ -589,12 +681,17 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
             return;
         }
 
-        // 표: 행 범위 → 아직 안 정한 열을 순서대로
+        // 표·명단: 행 범위 → 아직 안 정한 열을 순서대로 (건너뛴 선택 열은 다시 묻지 않음)
         if (_pickKind is PickKind.Rows or PickKind.Column)
         {
-            string? nextCol = item.ColKeys.FirstOrDefault(k => item.ColOf(k) == null);
+            string? nextCol = item.ColKeys.FirstOrDefault(k => item.ColOf(k) == null && !_skippedCols.Contains(k));
             if (nextCol != null) { StartPick(item, PickKind.Column, nextCol); return; }
         }
+
+        // 숫자 누계: 오늘 칸 → 누계 칸 → 전일 칸(선택)
+        if (item.IsCounter && _pickKind == PickKind.Cell && item.TotalCell == null) { StartPick(item, PickKind.TotalCell); return; }
+        if (item.IsCounter && _pickKind == PickKind.TotalCell && item.PrevCell == null && !item.PrevSkipped)
+        { StartPick(item, PickKind.PrevCell); return; }
 
         CancelPick();
 

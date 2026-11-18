@@ -53,41 +53,65 @@ public enum PickKind
     Rows,       // 표의 데이터 행 범위 (드래그 후 확인)
     Lines,      // 여러 줄 텍스트 칸들 (드래그 후 확인)
     Column,     // 표의 열 하나 (그 열의 아무 칸 클릭)
+    TotalCell,  // 숫자 누계: 누계 칸
+    PrevCell,   // 숫자 누계: 전일 칸 (없으면 건너뛰기)
 }
 
 // ════════════════════════════════════════════════════════════════════
 // 항목 종류 (추가할 때 고르는 목록)
 // ════════════════════════════════════════════════════════════════════
 
-public record ItemTypeOption(string Icon, string Label, string Type, string? FixedId = null)
+public record ItemTypeOption(string Icon, string Label, string Type, string? FixedId = null, string Hint = "")
 {
     public string Display => $"{Icon}  {Label}";
     public override string ToString() => Display;
 
-    public bool AsksSuffix => Type is FieldTypes.Input or FieldTypes.Photo;
+    public bool AsksSuffix => Type is FieldTypes.Input or FieldTypes.Photo or BlockTypes.Value;
     public bool AsksTime   => Type == FieldTypes.Photo;
+    public bool HasHint    => Hint.Length > 0;
 
+    /// <summary>[+ 항목 추가] 에 보이는 종류. 뜻(날씨·장비 등)은 이름과 규칙으로 사용자가 정한다.</summary>
     public static readonly IReadOnlyList<ItemTypeOption> All =
     [
-        new("✏️", "매일 입력하는 값 (글자·숫자)",       FieldTypes.Input),
-        new("📷", "사진 (+ 옆 칸 측정값)",              FieldTypes.Photo),
+        new("🔤", "값 — 글자·숫자 하나",                BlockTypes.Value,   Hint: "날씨, 공종, 측정값처럼 칸 하나. 매일 입력 / 어제 값 그대로 / 고정값 중에서 고릅니다."),
+        new("📅", "날짜 — 형식 고르기",                  BlockTypes.Date,    Hint: "고른 날짜를 원하는 모양(2026.11.18 / 2026년 11월 18일 수요일 …)으로 씁니다."),
+        new("📝", "여러 줄 글 — 작업사항 등",            BlockTypes.Lines,   Hint: "칸 여러 개에 한 줄씩. '어제 명일 → 오늘 금일' 처럼 처음 값을 정할 수 있습니다."),
+        new("➕", "숫자 누계 — 오늘 + 누계",             BlockTypes.Counter, Hint: "오늘 숫자를 입력하면 누계 = 어제 누계 + 오늘. 폐기물 반출 대수, 철거동 수 등."),
+        new("📊", "표 — 줄마다 전일·금일·누계",          BlockTypes.Table,   Hint: "장비·인원 투입현황처럼 이름 줄마다 숫자. 열마다 역할을 클릭으로 정합니다."),
+        new("👥", "명단 — 오늘 나온 사람",               BlockTypes.Roster,  Hint: "출력일보처럼 한 줄에 한 사람(직종·성명·작업내용). 사람 목록에서 체크합니다."),
+        new("🧮", "계산 — 다른 항목 합계·이름 나열",     BlockTypes.Calc,    Hint: "TBM 인원 = 인원 표 합계 + 수장재, 투입 장비 이름 나열 등."),
+        new("📷", "사진 (+ 옆 칸 측정값)",               FieldTypes.Photo),
         new("📍", "그림·글상자 위치 (장비·측정기 표시)", FieldTypes.ShapePosition),
-        new("📅", "날짜 — 2026.11.05",                  FieldTypes.DateSimple),
-        new("📅", "날짜 — 2026년 11월 05일 목요일",     FieldTypes.DateKorean),
-        new("🌤", "날씨",                               FieldTypes.Text, "weather"),
-        new("📝", "금일 작업사항 (여러 줄)",            FieldTypes.Multiline, "today_work"),
-        new("📝", "명일 작업사항 (여러 줄)",            FieldTypes.Multiline, "tomorrow_work"),
-        new("🚜", "장비 투입현황 표",                   FieldTypes.EquipmentTable),
-        new("👷", "인원 투입현황 표",                   FieldTypes.PersonnelTable),
-        new("🚜", "투입 장비명 (자동)",                 FieldTypes.ActiveEquipmentNames),
-        new("👷", "TBM 인원 (자동)",                    FieldTypes.TbmPersonnel),
-        new("✅", "참석율 (항상 100)",                  FieldTypes.AttendanceRate),
+        new("✏️", "시트마다 따로 입력하는 값",            FieldTypes.Input,   Hint: "같은 모양 시트 여러 개에 시트마다 다른 값을 넣을 때 (예: 측정 장소별 값)."),
+    ];
+
+    /// <summary>예전 방식 종류 (불러온 설정에만 보이고, 새로 추가하는 목록에는 없다)</summary>
+    private static readonly IReadOnlyList<ItemTypeOption> Legacy =
+    [
+        new("📅", "날짜 — 2026.11.05 (예전 방식)",              FieldTypes.DateSimple),
+        new("📅", "날짜 — 2026년 11월 05일 목요일 (예전 방식)", FieldTypes.DateKorean),
+        new("🌤", "날씨 (예전 방식)",                           FieldTypes.Text, "weather"),
+        new("🔤", "글자 (예전 방식)",                           FieldTypes.Text),
+        new("📝", "금일 작업사항 (예전 방식)",                  FieldTypes.Multiline, "today_work"),
+        new("📝", "명일 작업사항 (예전 방식)",                  FieldTypes.Multiline, "tomorrow_work"),
+        new("📝", "여러 줄 (예전 방식)",                        FieldTypes.Multiline),
+        new("🚜", "장비 투입현황 표 (예전 방식)",               FieldTypes.EquipmentTable),
+        new("👷", "인원 투입현황 표 (예전 방식)",               FieldTypes.PersonnelTable),
+        new("🚜", "투입 장비명 (예전 방식)",                    FieldTypes.ActiveEquipmentNames),
+        new("👷", "TBM 인원 (예전 방식)",                       FieldTypes.TbmPersonnel),
+        new("✅", "참석율 100 (예전 방식)",                     FieldTypes.AttendanceRate),
     ];
 
     public static ItemTypeOption For(string type, string id) =>
-        All.FirstOrDefault(o => o.Type == type && (o.FixedId == null || o.FixedId == id))
-        ?? All.FirstOrDefault(o => o.Type == type)
+        All.Concat(Legacy).FirstOrDefault(o => o.Type == type && (o.FixedId == null || o.FixedId == id))
+        ?? All.Concat(Legacy).FirstOrDefault(o => o.Type == type)
         ?? new("•", type, type);
+}
+
+/// <summary>콤보 상자의 선택지 하나 (화면 글자 + 저장 값)</summary>
+public record Choice(string Label, string Value)
+{
+    public override string ToString() => Label;
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -106,28 +130,108 @@ public class SetupItemViewModel : ViewModelBase
     public string TypeLabel => Option.Label;
 
     private string _label;
-    public string Label { get => _label; set => SetField(ref _label, value); }
+    public string Label { get => _label; set { if (SetField(ref _label, value)) OnPropertyChanged(nameof(KeyHint)); } }
 
     // ── 지정 정보 ────────────────────────────────────────────────────
-    private string? _cell, _valueCell, _suffix, _time, _placeholder;
+    private string? _cell, _valueCell, _suffix, _time, _placeholder, _totalCell, _prevCell, _sheet;
     public string? Cell        { get => _cell;        set { if (SetField(ref _cell, value)) Changed(); } }
     public string? ValueCell   { get => _valueCell;   set { if (SetField(ref _valueCell, value)) Changed(); } }
     public string? Suffix      { get => _suffix;      set { if (SetField(ref _suffix, value)) Changed(); } }
     public string? Time        { get => _time;        set { if (SetField(ref _time, value)) Changed(); } }
     public string? Placeholder { get => _placeholder; set { if (SetField(ref _placeholder, value)) Changed(); } }
+    public string? TotalCell   { get => _totalCell;   set { if (SetField(ref _totalCell, value)) Changed(); } }
+    public string? PrevCell    { get => _prevCell;    set { if (SetField(ref _prevCell, value)) Changed(); } }
+
+    /// <summary>"적용할 시트" 가 아닌 시트에서 지정했으면 그 시트 이름 (그 시트에만 쓴다)</summary>
+    public string? Sheet { get => _sheet; set { if (SetField(ref _sheet, value)) Changed(); } }
+    public bool HasOwnSheet => !string.IsNullOrWhiteSpace(_sheet);
 
     public List<string> Cells { get; private set; } = [];
     public List<string> ShapeNames { get; private set; } = [];
     public List<int> ShapeIndexes { get; private set; } = [];
     public ObservableCollection<PresetItemViewModel> Presets { get; } = [];
 
-    // 표
+    // 표·명단
     public int StartRow { get; private set; }
     public int EndRow   { get; private set; }
-    public Dictionary<string, string> Cols { get; } = [];   // "name","prev","today","role","prevCum" → 열 문자
+    public Dictionary<string, string> Cols { get; } = [];   // 역할 → 열 문자
 
     private string _newPresetName = "";
     public string NewPresetName { get => _newPresetName; set => SetField(ref _newPresetName, value); }
+
+    // ── 블록 규칙 ────────────────────────────────────────────────────
+
+    private string _key = "";
+    /// <summary>값 이름. 다른 문서와 같은 이름이면 메인 화면에서 한 번만 입력한다.</summary>
+    public string Key { get => _key; set { if (SetField(ref _key, value)) OnPropertyChanged(nameof(KeyHint)); } }
+    public string KeyHint => string.IsNullOrWhiteSpace(_key) ? $"(비우면 '{Label}')" : "";
+
+    public static IReadOnlyList<Choice> ValueSourceList { get; } =
+    [
+        new("매일 입력", BlockTypes.SourceInput), new("어제 값 그대로 (안 바꿈)", BlockTypes.SourceKeep),
+        new("항상 같은 값", BlockTypes.SourceFixed),
+    ];
+    // 화면 바인딩용 (WPF 바인딩은 인스턴스 속성만 읽는다)
+    public IReadOnlyList<Choice> ValueSources => ValueSourceList;
+    public IReadOnlyList<Choice> CalcKinds => CalcKindList;
+    /// <summary>다른 항목 이름 목록 (명단 이름 고르기 등)</summary>
+    public List<string> OtherKeys => _host.KnownKeys().Where(k => k != EffectiveKey).ToList();
+
+    private Choice _valueSource = ValueSourceList[0];
+    public Choice ValueSource
+    {
+        get => _valueSource;
+        set { if (SetField(ref _valueSource, value)) { OnPropertyChanged(nameof(IsFixedValue)); Changed(); } }
+    }
+    public bool IsFixedValue => _valueSource.Value == BlockTypes.SourceFixed;
+
+    private string _fixedValue = "";
+    public string FixedValue { get => _fixedValue; set => SetField(ref _fixedValue, value); }
+
+    public IReadOnlyList<string> DateFormats => BlockTypes.DateFormats;
+    private string _dateFormat = BlockTypes.DateFormats[0];
+    public string DateFormat
+    {
+        get => _dateFormat;
+        set { if (SetField(ref _dateFormat, value)) { OnPropertyChanged(nameof(DatePreview)); Changed(); } }
+    }
+    /// <summary>오늘 날짜로 미리 보기 (예: "2026.11.18")</summary>
+    public string DatePreview => "→ " + BlockTypes.FormatDate(_dateFormat, DateTime.Today);
+
+    private string _prefix = "";
+    public string Prefix { get => _prefix; set => SetField(ref _prefix, value); }
+
+    private string _startFrom = "";
+    /// <summary>여러 줄의 처음 값: "" 빈 칸 / "same" 어제 이 항목 / 다른 항목 이름</summary>
+    public string StartFrom { get => _startFrom; set => SetField(ref _startFrom, value); }
+    /// <summary>처음 값 고르기 목록 (다른 항목 이름은 host 가 알려 준다)</summary>
+    public List<Choice> StartFromChoices =>
+        [new("빈 칸에서 시작", ""), new("어제 이 항목 그대로", "same"),
+         .. _host.KnownKeys().Where(k => k != EffectiveKey).Select(k => new Choice($"어제 '{k}' 에서 (예: 금일 ← 명일)", k))];
+
+    public static IReadOnlyList<Choice> CalcKindList { get; } =
+    [
+        new("합계 (표의 금일·숫자·명단 인원 더하기)", BlockTypes.CalcSum),
+        new("이름 나열 (표에서 금일이 있는 줄)", BlockTypes.CalcNames),
+        new("명단 인원 수", BlockTypes.CalcCount),
+    ];
+    private Choice _calcKind = CalcKindList[0];
+    public Choice CalcKind { get => _calcKind; set { if (SetField(ref _calcKind, value)) Changed(); } }
+
+    private string _sourcesText = "";
+    /// <summary>계산에 쓸 항목 이름들 (쉼표로)</summary>
+    public string SourcesText { get => _sourcesText; set { if (SetField(ref _sourcesText, value)) Changed(); } }
+    public string KnownKeysText => "쓸 수 있는 이름: " + string.Join(", ", _host.KnownKeys().Where(k => k != EffectiveKey));
+
+    private string _rosterKey = "";
+    /// <summary>표: 금일을 셀 명단 이름 (비우면 화면에서 입력)</summary>
+    public string RosterKey { get => _rosterKey; set => SetField(ref _rosterKey, value); }
+
+    private string _roleMapText = "";
+    /// <summary>표: 줄 이름 ↔ 명단 직종 짝짓기. 예) "관리자 = 소장, 차장, 대리 / 장비 = 장비"</summary>
+    public string RoleMapText { get => _roleMapText; set => SetField(ref _roleMapText, value); }
+
+    public string EffectiveKey => string.IsNullOrWhiteSpace(_key) ? Label.Trim() : _key.Trim();
 
     // ── 화면 표시용 ──────────────────────────────────────────────────
     public bool IsHwpx        => _host.IsHwpx;
@@ -136,18 +240,31 @@ public class SetupItemViewModel : ViewModelBase
     public bool IsShape       => Type == FieldTypes.ShapePosition && !IsHwpx;
     public bool IsEquipTable  => Type == FieldTypes.EquipmentTable && !IsHwpx;
     public bool IsPersonTable => Type == FieldTypes.PersonnelTable && !IsHwpx;
-    public bool HasSuffix     => Type is FieldTypes.Input or FieldTypes.Photo;
+    public bool HasSuffix     => Type is FieldTypes.Input or FieldTypes.Photo || (Type == BlockTypes.Value && !IsFixedValue);
+
+    public bool IsBlock   => BlockTypes.IsBlock(Type);
+    public bool HasKey    => IsBlock && Type != BlockTypes.Date;
+    public bool IsValue   => Type == BlockTypes.Value;
+    public bool IsDate    => Type == BlockTypes.Date;
+    public bool IsLines   => Type == BlockTypes.Lines;
+    public bool IsCounter => Type == BlockTypes.Counter && !IsHwpx;
+    public bool IsTable   => Type == BlockTypes.Table;
+    public bool IsCalc    => Type == BlockTypes.Calc;
+    public bool IsLegacy  => BlockMigration.IsLegacy(Type);
 
     /// <summary>카드에 보여 줄 지정 내용 요약 (예: "사진 D12 · 값 E12 · 10:00")</summary>
-    public string Summary => IsHwpx ? "" : Type switch
+    public string Summary => IsHwpx ? "" : (HasOwnSheet ? $"[{Sheet}] " : "") + Type switch
     {
         FieldTypes.Photo => Join(Cell is null ? null : $"사진 {Cell}", ValueCell is null ? null : $"값 {ValueCell}",
                                  string.IsNullOrEmpty(Time) ? null : Time),
         FieldTypes.ShapePosition => ShapeNames.Count == 0 ? "" : $"{string.Join(", ", ShapeNames)} · 저장된 위치 {Presets.Count}개",
-        FieldTypes.Multiline => Cells.Count == 0 ? "" : $"{Cells[0]} ~ {Cells[^1]} ({Cells.Count}줄)",
-        FieldTypes.EquipmentTable or FieldTypes.PersonnelTable =>
-            StartRow == 0 ? "" : $"{StartRow}~{EndRow}행 · " + string.Join(" ", ColKeys.Select(k => $"{ColTitle(k)} {ColOf(k) ?? "?"}")),
-        _ => Cell ?? "",
+        FieldTypes.Multiline or BlockTypes.Lines => Cells.Count == 0 ? "" : $"{Cells[0]} ~ {Cells[^1]} ({Cells.Count}줄)",
+        BlockTypes.Counter => Join(Cell is null ? null : $"오늘 {Cell}", TotalCell is null ? null : $"누계 {TotalCell}",
+                                   PrevCell is null ? null : $"전일 {PrevCell}"),
+        FieldTypes.EquipmentTable or FieldTypes.PersonnelTable or BlockTypes.Table or BlockTypes.Roster =>
+            StartRow == 0 ? "" : $"{StartRow}~{EndRow}행 · " + string.Join(" ", ColKeys.Where(k => ColOf(k) != null).Select(k => $"{ColTitle(k)} {ColOf(k)}")),
+        BlockTypes.Calc => SourcesText.Length == 0 ? Cell ?? "" : Join(Cell, $"= {CalcKind.Label.Split(' ')[0]}({SourcesText})"),
+        _ => Cell ?? (IsValue ? "칸 없음 (계산에만 사용)" : ""),
     };
 
     /// <summary>엑셀에서 지정이 끝났는지 (카드의 ✓ / "지정 필요")</summary>
@@ -155,30 +272,53 @@ public class SetupItemViewModel : ViewModelBase
     {
         FieldTypes.Photo         => Cell != null,
         FieldTypes.ShapePosition => ShapeNames.Count > 0,
-        FieldTypes.Multiline     => Cells.Count > 0,
+        FieldTypes.Multiline or BlockTypes.Lines => Cells.Count > 0,
         FieldTypes.EquipmentTable or FieldTypes.PersonnelTable => StartRow > 0 && ColKeys.All(k => ColOf(k) != null),
+        BlockTypes.Table or BlockTypes.Roster => StartRow > 0 && RequiredColKeys.All(k => ColOf(k) != null),
+        BlockTypes.Counter => Cell != null || TotalCell != null,
+        BlockTypes.Value   => true,   // 칸이 없으면 계산에만 쓰는 입력
+        BlockTypes.Calc    => Cell != null && SourcesText.Trim().Length > 0,
         _ => Cell != null,
     };
 
-    /// <summary>표 종류별로 지정할 열 (순서대로 안내)</summary>
-    public string[] ColKeys => Type == FieldTypes.EquipmentTable ? ["name", "prev", "today"]
-                             : Type == FieldTypes.PersonnelTable ? ["role", "prevCum", "today"] : [];
+    /// <summary>표·명단에서 지정할 열 (순서대로 안내)</summary>
+    public string[] ColKeys => Type switch
+    {
+        FieldTypes.EquipmentTable => ["name", "prev", "today"],
+        FieldTypes.PersonnelTable => ["role", "prevCum", "today"],
+        BlockTypes.Table  => BlockTypes.TableRoles.Select(r => r.Role).ToArray(),
+        BlockTypes.Roster => BlockTypes.RosterRoles.Select(r => r.Role).ToArray(),
+        _ => [],
+    };
+
+    /// <summary>꼭 지정해야 하는 열 (나머지는 [건너뛰기] 가능)</summary>
+    public string[] RequiredColKeys => Type switch
+    {
+        BlockTypes.Table  => BlockTypes.TableRoles.Where(r => r.Required).Select(r => r.Role).ToArray(),
+        BlockTypes.Roster => BlockTypes.RosterRoles.Where(r => r.Required).Select(r => r.Role).ToArray(),
+        _ => ColKeys,
+    };
+
+    public bool IsOptionalCol(string key) => !RequiredColKeys.Contains(key);
 
     public static string ColTitle(string key) => key switch
     {
-        "name" => "장비명", "prev" => "전일", "today" => "금일", "role" => "직종", "prevCum" => "전일누계", _ => key,
+        "role" => "직종", "prevCum" => "전일누계",
+        _ => BlockTypes.RoleTitle(key),   // 이름·규격·전일·금일·누계·직종·성명·작업내용
     };
 
     public string? ColOf(string key) => Cols.TryGetValue(key, out var v) ? v : null;
 
-    /// <summary>표 카드의 열 버튼들 (예: "장비명 B", "전일 ?")</summary>
+    /// <summary>표 카드의 열 버튼들 (예: "이름 B", "전일 ?")</summary>
     public List<ColumnButton> ColumnButtons =>
-        ColKeys.Select(k => new ColumnButton(k, $"{ColTitle(k)} {ColOf(k) ?? "?"}")).ToList();
+        ColKeys.Select(k => new ColumnButton(k, $"{ColTitle(k)} {ColOf(k) ?? (IsOptionalCol(k) ? "-" : "?")}")).ToList();
 
     // ── 커맨드 ───────────────────────────────────────────────────────
     public ICommand PickCommand       { get; }
     public ICommand PickValueCommand  { get; }
     public ICommand PickColumnCommand { get; }
+    public ICommand PickTotalCommand  { get; }
+    public ICommand PickPrevCommand   { get; }
     public ICommand RemoveCommand     { get; }
     public ICommand RevealCommand     { get; }
     public ICommand SavePresetCommand { get; }
@@ -194,6 +334,8 @@ public class SetupItemViewModel : ViewModelBase
         PickCommand       = new RelayCommand(_ => _host.StartPick(this, MainPickKind));
         PickValueCommand  = new RelayCommand(_ => _host.StartPick(this, PickKind.ValueCell));
         PickColumnCommand = new RelayCommand(p => _host.StartPick(this, PickKind.Column, p as string));
+        PickTotalCommand  = new RelayCommand(_ => _host.StartPick(this, PickKind.TotalCell));
+        PickPrevCommand   = new RelayCommand(_ => _host.StartPick(this, PickKind.PrevCell));
         RemoveCommand     = new RelayCommand(_ => _host.RemoveItem(this));
         RevealCommand     = new RelayCommand(_ => _host.RevealItem(this));
         SavePresetCommand = new RelayCommand(_ => _host.SavePreset(this));
@@ -204,8 +346,8 @@ public class SetupItemViewModel : ViewModelBase
     {
         FieldTypes.Photo         => PickKind.Picture,
         FieldTypes.ShapePosition => PickKind.Shapes,
-        FieldTypes.Multiline     => PickKind.Lines,
-        FieldTypes.EquipmentTable or FieldTypes.PersonnelTable => PickKind.Rows,
+        FieldTypes.Multiline or BlockTypes.Lines => PickKind.Lines,
+        FieldTypes.EquipmentTable or FieldTypes.PersonnelTable or BlockTypes.Table or BlockTypes.Roster => PickKind.Rows,
         _ => PickKind.Cell,
     };
 
@@ -215,6 +357,10 @@ public class SetupItemViewModel : ViewModelBase
     public void SetLines(List<string> cells)  { Cells = cells; Changed(); }
     public void SetRows(int start, int end)   { StartRow = start; EndRow = end; Changed(); }
     public void SetColumn(string key, string col) { Cols[key] = col; Changed(); }
+
+    /// <summary>숫자 누계: 전일 칸이 없다고 [건너뛰기] 했는지 (다시 묻지 않게)</summary>
+    public bool PrevSkipped { get; private set; }
+    public void SetPrevSkipped() => PrevSkipped = true;
 
     public void AddPreset(ShapePreset p)
     {
@@ -229,17 +375,47 @@ public class SetupItemViewModel : ViewModelBase
         OnPropertyChanged(nameof(Summary));
         OnPropertyChanged(nameof(IsComplete));
         OnPropertyChanged(nameof(ColumnButtons));
+        OnPropertyChanged(nameof(HasSuffix));
+        OnPropertyChanged(nameof(HasOwnSheet));
     }
 
     /// <summary>엑셀/한글 전환 시 표시 갱신</summary>
     public void RefreshMode()
     {
         foreach (var n in new[] { nameof(IsHwpx), nameof(IsExcel), nameof(IsShape), nameof(IsEquipTable),
-                                  nameof(IsPersonTable), nameof(Summary), nameof(IsComplete) })
+                                  nameof(IsPersonTable), nameof(IsCounter), nameof(Summary), nameof(IsComplete) })
             OnPropertyChanged(n);
     }
 
+    /// <summary>다른 항목이 추가·이름이 바뀌었을 때 (처음 값·계산 목록 갱신)</summary>
+    public void RefreshKnownKeys()
+    {
+        OnPropertyChanged(nameof(StartFromChoices));
+        OnPropertyChanged(nameof(KnownKeysText));
+        OnPropertyChanged(nameof(OtherKeys));
+    }
+
     private static string Join(params string?[] parts) => string.Join(" · ", parts.Where(p => !string.IsNullOrEmpty(p)));
+
+    // ── 짝짓기 글자 ↔ 사전 ───────────────────────────────────────────
+
+    /// <summary>"관리자 = 소장, 차장, 대리 / 장비 = 장비" → 사전</summary>
+    public static Dictionary<string, List<string>>? ParseRoleMap(string text)
+    {
+        var map = new Dictionary<string, List<string>>();
+        foreach (var part in text.Split(new[] { '/', ';', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            int eq = part.IndexOf('=');
+            if (eq <= 0) continue;
+            string row = part[..eq].Trim();
+            var jobs = part[(eq + 1)..].Split(',', StringSplitOptions.RemoveEmptyEntries).Select(j => j.Trim()).Where(j => j.Length > 0).ToList();
+            if (row.Length > 0 && jobs.Count > 0) map[row] = jobs;
+        }
+        return map.Count == 0 ? null : map;
+    }
+
+    public static string FormatRoleMap(Dictionary<string, List<string>>? map) =>
+        map == null ? "" : string.Join(" / ", map.Select(kv => $"{kv.Key} = {string.Join(", ", kv.Value)}"));
 
     // ── config 변환 ──────────────────────────────────────────────────
 
@@ -248,8 +424,14 @@ public class SetupItemViewModel : ViewModelBase
         var item = new SetupItemViewModel(host, f.Id, f.Label, f.Type)
         {
             _cell = f.Cell, _valueCell = f.ValueCell, _suffix = f.Suffix, _time = f.Time,
-            _placeholder = f.Placeholder,
+            _placeholder = f.Placeholder, _totalCell = f.TotalCell, _prevCell = f.PrevCell, _sheet = f.Sheet,
+            _key = f.Key ?? "", _fixedValue = f.FixedValue ?? "", _prefix = f.Prefix ?? "", _startFrom = f.StartFrom ?? "",
+            _sourcesText = string.Join(", ", f.Sources ?? []), _rosterKey = f.RosterKey ?? "",
+            _roleMapText = FormatRoleMap(f.RoleMap),
         };
+        item._valueSource = ValueSourceList.FirstOrDefault(c => c.Value == (f.ValueSource ?? BlockTypes.SourceInput)) ?? ValueSourceList[0];
+        item._calcKind    = CalcKindList.FirstOrDefault(c => c.Value == (f.CalcKind ?? BlockTypes.CalcSum)) ?? CalcKindList[0];
+        if (!string.IsNullOrWhiteSpace(f.DateFormat)) item._dateFormat = f.DateFormat;
         item.Cells      = f.Cells ?? [];
         item.ShapeNames = f.ShapeNames ?? [];
         item.ShapeIndexes = f.ShapeIndexes ?? [];
@@ -259,6 +441,7 @@ public class SetupItemViewModel : ViewModelBase
         Col("name", f.NameCol); Col("prev", f.PrevDayCol); Col("today", f.TodayCol);
         item._specCol = f.SpecCol;   // 화면에서 고르지 않는 값 — 그대로 보존
         Col("role", f.RoleCol); Col("prevCum", f.PrevCumulativeCol);
+        foreach (var c in f.Columns ?? []) Col(c.Role, c.Col);
         foreach (var p in f.Presets ?? []) item.Presets.Add(new PresetItemViewModel(p, item, host));
         return item;
     }
@@ -268,10 +451,40 @@ public class SetupItemViewModel : ViewModelBase
     public FieldConfig ToConfig()
     {
         var f = new FieldConfig { Id = Id, Label = Label.Trim(), Type = Type };
+        f.Sheet = NullIfEmpty(Sheet);
+        if (IsBlock)
+        {
+            f.Key = NullIfEmpty(Key);
+            switch (Type)
+            {
+                case BlockTypes.Value:
+                    f.ValueSource = ValueSource.Value == BlockTypes.SourceInput ? null : ValueSource.Value;
+                    f.FixedValue  = IsFixedValue ? FixedValue : null;
+                    f.Suffix      = IsFixedValue ? null : NullIfEmpty(Suffix);
+                    break;
+                case BlockTypes.Date:
+                    f.DateFormat = DateFormat;
+                    break;
+                case BlockTypes.Lines:
+                    f.Prefix    = string.IsNullOrEmpty(Prefix) ? null : Prefix;
+                    f.StartFrom = NullIfEmpty(StartFrom);
+                    break;
+                case BlockTypes.Calc:
+                    f.CalcKind = CalcKind.Value;
+                    f.Sources  = SourcesText.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(x => x.Trim())
+                                            .Where(x => x.Length > 0).ToList();
+                    break;
+                case BlockTypes.Table:
+                    f.RosterKey = NullIfEmpty(RosterKey);
+                    f.RoleMap   = f.RosterKey == null ? null : ParseRoleMap(RoleMapText);
+                    break;
+            }
+        }
+
         if (IsHwpx)
         {
             f.Placeholder = string.IsNullOrWhiteSpace(Placeholder) ? null : Placeholder.Trim();
-            f.Suffix = NullIfEmpty(Suffix);
+            if (!IsBlock) f.Suffix = NullIfEmpty(Suffix);
             return f;
         }
 
@@ -286,6 +499,7 @@ public class SetupItemViewModel : ViewModelBase
                 f.Presets      = Presets.Select(p => p.Preset).ToList();
                 break;
             case FieldTypes.Multiline:
+            case BlockTypes.Lines:
                 f.Cells = [.. Cells];
                 break;
             case FieldTypes.EquipmentTable:
@@ -296,6 +510,19 @@ public class SetupItemViewModel : ViewModelBase
             case FieldTypes.PersonnelTable:
                 f.StartRow = StartRow; f.EndRow = EndRow;
                 f.RoleCol = ColOf("role"); f.PrevCumulativeCol = ColOf("prevCum"); f.TodayCol = ColOf("today");
+                break;
+            case BlockTypes.Table:
+            case BlockTypes.Roster:
+                f.StartRow = StartRow; f.EndRow = EndRow;
+                f.Columns = ColKeys.Where(k => ColOf(k) != null).Select(k => new ColumnRole { Role = k, Col = ColOf(k)! }).ToList();
+                break;
+            case BlockTypes.Counter:
+                f.Cell = Cell; f.TotalCell = TotalCell; f.PrevCell = PrevCell;
+                break;
+            case BlockTypes.Value:
+            case BlockTypes.Date:
+            case BlockTypes.Calc:
+                f.Cell = Cell;
                 break;
             default:
                 f.Cell = Cell; f.Suffix = NullIfEmpty(Suffix);
@@ -327,6 +554,8 @@ public class PresetItemViewModel
 public interface ISetupHost
 {
     bool IsHwpx { get; }
+    /// <summary>이 문서와 다른 문서들에 있는 블록 값 이름 (처음 값·계산 고르기용)</summary>
+    IReadOnlyList<string> KnownKeys();
     void StartPick(SetupItemViewModel item, PickKind kind, string? columnKey = null);
     void RemoveItem(SetupItemViewModel item);
     void RevealItem(SetupItemViewModel item);

@@ -28,6 +28,7 @@ public class MainViewModel : ViewModelBase
             {
                 LoadDocumentDueList();
                 LoadPreviousData();   // 날짜가 바뀌면 그 날짜 기준 이전 파일에서 전일 값을 다시 읽는다
+                ReloadBlockValues(keepEdits: true);
             }
         }
     }
@@ -83,6 +84,153 @@ public class MainViewModel : ViewModelBase
         LoadDocumentDueList();
         LoadPhotoSlots();
         LoadDocInputCards();
+        LoadBlockInputs();
+    }
+
+    // ── 블록 입력 (항목 입력 단계) ───────────────────────────────────
+    // 모든 문서의 블록을 값 이름(Key)으로 묶어 입력 카드 하나씩. 체크한 문서에 있는 카드만 보인다.
+
+    public ObservableCollection<BlockInputViewModel> BlockInputs { get; } = [];
+
+    private bool _hasVisibleBlocks;
+    public bool HasVisibleBlocks => _hasVisibleBlocks;
+
+    private void LoadBlockInputs()
+    {
+        BlockInputs.Clear();
+        var byKey = new Dictionary<string, BlockInputViewModel>();
+        foreach (var doc in AppConfigLoader.Load().Documents)
+            foreach (var f in doc.Fields.Where(f => BlockTypes.IsBlock(f.Type)))
+            {
+                string key = BlockTypes.KeyOf(f);
+                if (!byKey.TryGetValue(key, out var vm))
+                {
+                    vm = BlockInputViewModel.Create(key, f);
+                    if (vm == null) continue;   // 날짜·고정값 등 입력할 것 없는 블록
+                    byKey[key] = vm;
+                    HookBlock(vm);
+                }
+                vm.AddDoc(doc);
+            }
+        // 계산 미리보기는 맨 아래
+        foreach (var vm in byKey.Values.OrderBy(v => v is CalcInputViewModel ? 1 : 0)) BlockInputs.Add(vm);
+
+        RefreshUsage();
+        ReloadBlockValues(keepEdits: false);
+    }
+
+    private void HookBlock(BlockInputViewModel vm)
+    {
+        vm.Edited += _ =>
+        {
+            if (_recalcing) return;
+            MarkDirty();
+            RecalcDerived();
+            RefreshSteps();
+        };
+        if (vm is LinesInputViewModel lines)
+            lines.PickRequested += l =>
+            {
+                var win = new WorkItemPickerWindow { Owner = Application.Current.MainWindow };
+                if (win.ShowDialog() == true)
+                    foreach (var text in win.SelectedItems) l.Add(text);
+            };
+    }
+
+    /// <summary>지금 화면의 블록 값 (계산 카드는 값이 없어 뺀다)</summary>
+    private Dictionary<string, BlockValue> BuildBlocks() =>
+        BlockInputs.Where(b => b is not CalcInputViewModel).ToDictionary(b => b.Key, b => b.ToValue());
+
+    private bool _recalcing;
+
+    /// <summary>명단에서 센 표 금일, 계산 카드 결과를 다시 구한다 (입력이 바뀔 때마다).</summary>
+    private void RecalcDerived()
+    {
+        if (_recalcing) return;
+        _recalcing = true;
+        try
+        {
+            var input = new DailyInput { Date = TargetDate, Blocks = BuildBlocks() };
+            var tables = BlockInputs.OfType<TableInputViewModel>().Where(t => t.FromRoster).ToList();
+            BlockEngine.ApplyRosterCounts(input, tables.Select(t => t.Field));
+            foreach (var t in tables) t.SetCounts(input.Block(t.Key).Rows);
+            foreach (var c in BlockInputs.OfType<CalcInputViewModel>())
+                c.Result = BlockEngine.Calc(c.Field, input);
+        }
+        catch (Exception ex) { AppLog.Error("계산 미리보기 실패", ex); }
+        finally { _recalcing = false; }
+    }
+
+    private int _blockLoadVersion;
+
+    /// <summary>
+    /// 블록의 처음 값(어제 누계·어제 작업·어제 명단 등)을 문서마다 앞 날짜 파일(없으면 서식)에서 읽는다.
+    /// keepEdits: 날짜만 바꿨을 때 — 이미 입력한 값은 살린다.
+    /// </summary>
+    private async void ReloadBlockValues(bool keepEdits)
+    {
+        int version = ++_blockLoadVersion;
+        if (BlockInputs.Count == 0) return;
+        try
+        {
+            var    config  = AppConfigLoader.Load();
+            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            DateTime date  = TargetDate;
+            var docs = config.Documents.Where(d => d.Fields.Any(f => BlockTypes.IsBlock(f.Type))).ToList();
+
+            var initial = await Task.Run(() =>
+            {
+                var all = new Dictionary<string, BlockValue>();
+                foreach (var doc in docs)
+                {
+                    try
+                    {
+                        var prev = GenericExcelWriter.FindPreviousFile(DocumentSchedule.DocumentDate(doc, date),
+                                                                       doc.OutputPattern, baseDir, config.OutputFolder);
+                        string file = prev?.Path ?? Path.Combine(baseDir, doc.TemplateFile);
+                        foreach (var kv in BlockEngine.InitialValues(doc, BlockEngine.ReadValues(file, doc)))
+                            all.TryAdd(kv.Key, kv.Value);
+                    }
+                    catch (Exception ex) { AppLog.Error($"블록 처음 값 읽기 실패: {doc.Name}", ex); }
+                }
+                return all;
+            });
+            if (version != _blockLoadVersion) return;   // 그 사이 날짜가 또 바뀜
+
+            bool track = _trackDirty;
+            _trackDirty = false;
+            _recalcing  = true;
+            try
+            {
+                foreach (var vm in BlockInputs)
+                {
+                    var v = initial.TryGetValue(vm.Key, out var found) ? found : new BlockValue();
+                    if (vm is RosterInputViewModel roster) roster.Load(v, config.People, keepEdits);
+                    else vm.Load(v, keepEdits);
+                }
+            }
+            finally { _recalcing = false; _trackDirty = track; }
+            RecalcDerived();
+            RefreshSteps();
+        }
+        catch (Exception ex) { AppLog.Error("블록 처음 값 불러오기 실패", ex); }
+    }
+
+    /// <summary>명단 카드의 사람들을 설정(config.json)의 사람 목록에 저장한다 (다음에 체크만 하면 되게).</summary>
+    private void SavePeople()
+    {
+        var rosters = BlockInputs.OfType<RosterInputViewModel>().ToList();
+        if (rosters.Count == 0) return;
+        try
+        {
+            var cfg = AppConfigLoader.Load();
+            var people = rosters.SelectMany(r => r.AllPeople())
+                                .GroupBy(p => p.Name).Select(g => g.First()).ToList();
+            // 화면에서 지운 사람은 목록에서도 빠진다 (명단 카드가 사람 목록 전체를 보여 주므로)
+            cfg.People = people;
+            AppConfigLoader.Save(cfg);
+        }
+        catch (Exception ex) { AppLog.Error("사람 목록 저장 실패", ex); }
     }
 
     private void LoadDocInputCards()
@@ -105,6 +253,7 @@ public class MainViewModel : ViewModelBase
     public ObservableCollection<StepItem> Steps { get; } =
     [
         new("docs",   "문서 · 기본 정보"),
+        new("blocks", "항목 입력"),
         new("work",   "작업사항"),
         new("crew",   "장비 · 인원"),
         new("photos", "사진 · 측정값"),
@@ -121,6 +270,7 @@ public class MainViewModel : ViewModelBase
             // ListBox 가 목록을 다시 그릴 때 잠깐 null 을 넣는 경우가 있어 무시한다
             if (value == null || !SetField(ref _currentStep, value)) return;
             OnPropertyChanged(nameof(ShowDocsStep));
+            OnPropertyChanged(nameof(ShowBlocksStep));
             OnPropertyChanged(nameof(ShowWorkStep));
             OnPropertyChanged(nameof(ShowCrewStep));
             OnPropertyChanged(nameof(ShowPhotosStep));
@@ -130,6 +280,7 @@ public class MainViewModel : ViewModelBase
     }
 
     public bool ShowDocsStep   => CurrentStep?.Key == "docs";
+    public bool ShowBlocksStep => CurrentStep?.Key == "blocks";
     public bool ShowWorkStep   => CurrentStep?.Key == "work";
     public bool ShowCrewStep   => CurrentStep?.Key == "crew";
     public bool ShowPhotosStep => CurrentStep?.Key == "photos";
@@ -156,6 +307,9 @@ public class MainViewModel : ViewModelBase
     private bool _hasVisibleDocInputs, _hasVisiblePhotoSlots, _noDocChecked;
 
     public bool UsesWork             => _usesWork;
+    /// <summary>예전 방식 날씨 칸을 쓰는 문서가 있을 때만 기본 정보에 날씨를 보인다 (블록 문서는 '항목 입력'에서)</summary>
+    public bool UsesWeather          => _usesWeather;
+    private bool _usesWeather = true;
     public bool UsesEquipment        => _usesEquipment;
     public bool UsesPersonnel        => _usesPersonnel;
     public bool UsesSujangjae        => _usesSujangjae;
@@ -175,6 +329,8 @@ public class MainViewModel : ViewModelBase
         var ids  = docs.Select(d => d.Id).ToHashSet();
 
         SetField(ref _usesWork,      docs.Any(d => Has(d, FieldTypes.Multiline)), nameof(UsesWork));
+        SetField(ref _usesWeather,   docs.Count == 0 || docs.Any(d => d.Fields.Any(f => f.Type == FieldTypes.Text && f.Id == "weather")),
+                 nameof(UsesWeather));
         SetField(ref _usesEquipment, docs.Any(d => Has(d, FieldTypes.EquipmentTable, FieldTypes.ActiveEquipmentNames)), nameof(UsesEquipment));
         SetField(ref _usesPersonnel, docs.Any(d => Has(d, FieldTypes.PersonnelTable, FieldTypes.TbmPersonnel)), nameof(UsesPersonnel));
         SetField(ref _usesSujangjae, docs.Any(UsesSujangjaeFor), nameof(UsesSujangjae));
@@ -185,6 +341,10 @@ public class MainViewModel : ViewModelBase
         SetField(ref _hasVisibleDocInputs,  DocInputCards.Any(c => c.IsVisible), nameof(HasVisibleDocInputs));
         SetField(ref _hasVisiblePhotoSlots, PhotoSlots.Any(s => s.IsVisible),    nameof(HasVisiblePhotoSlots));
         SetField(ref _noDocChecked,         docs.Count == 0,                     nameof(NoDocChecked));
+
+        foreach (var b in BlockInputs) b.IsVisible = b.DocIds.Overlaps(ids);
+        SetField(ref _hasVisibleBlocks, BlockInputs.Any(b => b.IsVisible), nameof(HasVisibleBlocks));
+        Step("blocks").IsVisible = _hasVisibleBlocks;
 
         Step("work").IsVisible   = _usesWork;
         Step("crew").IsVisible   = _usesEquipment || _usesPersonnel || _usesSujangjae;
@@ -216,6 +376,12 @@ public class MainViewModel : ViewModelBase
         crew.IsDone  = (!_usesEquipment || TotalTodayEquipment > 0)
                     && (!_usesPersonnel || TotalTodayPersonnelWithSujangjae > 0);
         crew.Summary = $"장비 {TotalTodayEquipment}대 · 인원 {TotalTodayPersonnelWithSujangjae}명";
+
+        var blocks = BlockInputs.Where(b => b.IsVisible && b is not CalcInputViewModel).ToList();
+        var blockStep = Step("blocks");
+        int blockFilled = blocks.Count(b => b.IsFilled);
+        blockStep.IsDone  = blocks.Count > 0 && blockFilled == blocks.Count;
+        blockStep.Summary = $"{blockFilled}/{blocks.Count} 입력";
 
         var items  = DocInputCards.Where(c => c.IsVisible).SelectMany(c => c.AllItems).Select(x => x.Item).ToList();
         var slots  = PhotoSlots.Where(s => s.IsVisible).ToList();
@@ -344,6 +510,7 @@ public class MainViewModel : ViewModelBase
         LoadDocumentDueList();
         LoadPhotoSlots();
         LoadDocInputCards();
+        LoadBlockInputs();
         _trackDirty = true;
     }
 
@@ -622,6 +789,10 @@ public class MainViewModel : ViewModelBase
         var input = BuildDailyInput();
         foreach (var card in DocInputCards)
             card.FillInput(input);
+        // 블록 값 (명단에서 센 표 금일 포함)
+        input.Blocks = BuildBlocks();
+        BlockEngine.ApplyRosterCounts(input, BlockInputs.OfType<TableInputViewModel>().Select(t => t.Field));
+        SavePeople();
 
         var docs   = targets.Select(t => t.Config).ToList();
         var photos = PhotoSlots.Where(s => s.HasPhoto)

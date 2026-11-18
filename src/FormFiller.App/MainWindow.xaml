@@ -104,6 +104,173 @@
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <!-- ══════════ 항목 입력 카드 (블록 종류마다) ══════════ -->
+        <Style x:Key="BlockCard" TargetType="Border">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="BorderBrush" Value="#E2E8F0"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="Padding" Value="12,8"/>
+            <Setter Property="Margin" Value="0,0,0,10"/>
+        </Style>
+        <!-- 카드 제목 줄: 아이콘 · 이름 · 쓰는 문서 -->
+        <DataTemplate x:Key="BlockHeader">
+            <DockPanel Margin="0,0,0,6">
+                <TextBlock DockPanel.Dock="Right" Text="{Binding UsedIn}" FontSize="11" Foreground="#A0AEC0" VerticalAlignment="Center"/>
+                <TextBlock Text="{Binding Icon}" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" Foreground="#2D3748" VerticalAlignment="Center"/>
+            </DockPanel>
+        </DataTemplate>
+
+        <DataTemplate DataType="{x:Type vm:ValueInputViewModel}">
+            <Border Style="{StaticResource BlockCard}">
+                <StackPanel>
+                    <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource BlockHeader}"/>
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Right" Text="{Binding Suffix}" Margin="6,0,0,0" VerticalAlignment="Center"
+                                   Foreground="#718096" Visibility="{Binding HasSuffix, Converter={StaticResource BoolVis}}"/>
+                        <TextBox Text="{Binding Text, UpdateSourceTrigger=PropertyChanged}"/>
+                    </DockPanel>
+                </StackPanel>
+            </Border>
+        </DataTemplate>
+
+        <DataTemplate DataType="{x:Type vm:LinesInputViewModel}">
+            <Border Style="{StaticResource BlockCard}">
+                <StackPanel>
+                    <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource BlockHeader}"/>
+                    <ItemsControl ItemsSource="{Binding Lines}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <DockPanel Margin="0,0,0,4">
+                                    <Button DockPanel.Dock="Right" Content="✕" Command="{Binding RemoveCommand}"
+                                            Style="{StaticResource DelBtn}" Margin="6,0,0,0"/>
+                                    <TextBox Text="{Binding Text, UpdateSourceTrigger=PropertyChanged}"/>
+                                </DockPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                        <Button Content="+ 줄 추가" Command="{Binding AddLineCommand}" Style="{StaticResource AddBtn}" Margin="0,0,6,0"/>
+                        <Button Content="☰ 항목 선택" Command="{Binding PickCommand}" Style="{StaticResource AddBtn}"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </DataTemplate>
+
+        <DataTemplate DataType="{x:Type vm:CounterInputViewModel}">
+            <Border Style="{StaticResource BlockCard}">
+                <StackPanel>
+                    <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource BlockHeader}"/>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="전일 누계" Style="{StaticResource LabelStyle}"/>
+                        <TextBox Text="{Binding Prev, UpdateSourceTrigger=LostFocus}" Width="70" Style="{StaticResource EditCell}"
+                                 ToolTip="어제 파일에서 읽은 누계. 처음 쓰는 날이면 직접 입력"/>
+                        <TextBlock Text="+  오늘" Style="{StaticResource LabelStyle}" Margin="12,0,6,0"/>
+                        <TextBox Text="{Binding Today, UpdateSourceTrigger=PropertyChanged}" Width="70" Style="{StaticResource EditCell}"/>
+                        <TextBlock Text="=  누계" Style="{StaticResource LabelStyle}" Margin="12,0,6,0"/>
+                        <TextBlock Text="{Binding Total}" FontWeight="SemiBold" VerticalAlignment="Center" Foreground="#2B6CB0"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </DataTemplate>
+
+        <DataTemplate DataType="{x:Type vm:TableInputViewModel}">
+            <Border Style="{StaticResource BlockCard}">
+                <StackPanel>
+                    <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource BlockHeader}"/>
+                    <TextBlock Text="{Binding RosterNote}" FontSize="11" Foreground="#2B6CB0" Margin="0,0,0,4"
+                               Visibility="{Binding FromRoster, Converter={StaticResource BoolVis}}"/>
+                    <DataGrid ItemsSource="{Binding Rows}" AutoGenerateColumns="False" CanUserAddRows="False"
+                              HeadersVisibility="Column" GridLinesVisibility="Horizontal" RowHeight="28"
+                              BorderBrush="#E2E8F0" HorizontalGridLinesBrush="#EDF2F7">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="이름" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
+                            <DataGridTextColumn Header="규격" Binding="{Binding Spec, UpdateSourceTrigger=PropertyChanged}" Width="80"/>
+                            <DataGridTextColumn Header="전일" Binding="{Binding Prev, UpdateSourceTrigger=LostFocus}" Width="70"/>
+                            <DataGridTextColumn Header="금일" Binding="{Binding Today, UpdateSourceTrigger=PropertyChanged}" Width="70"/>
+                            <DataGridTextColumn Header="누계" Binding="{Binding Total, Mode=OneWay}" Width="70" IsReadOnly="True"/>
+                            <DataGridTemplateColumn Width="34">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <Button Content="✕" Command="{Binding RemoveCommand}" Style="{StaticResource DelBtn}"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                    <DockPanel Margin="0,6,0,0">
+                        <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" Foreground="#4A5568">
+                            <Run Text="금일 합계 "/><Run Text="{Binding TodaySum, Mode=OneWay}" FontWeight="SemiBold"/>
+                        </TextBlock>
+                        <StackPanel Orientation="Horizontal">
+                            <Button Content="+ 줄 추가" Command="{Binding AddRowCommand}" Style="{StaticResource AddBtn}" Margin="0,0,6,0"/>
+                            <Button Content="↻ 금일을 어제와 같게" Command="{Binding CopyLastTodayCommand}" Style="{StaticResource AddBtn}"
+                                    Visibility="{Binding TodayEditable, Converter={StaticResource BoolVis}}"/>
+                        </StackPanel>
+                    </DockPanel>
+                </StackPanel>
+            </Border>
+        </DataTemplate>
+
+        <DataTemplate DataType="{x:Type vm:RosterInputViewModel}">
+            <Border Style="{StaticResource BlockCard}">
+                <StackPanel>
+                    <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource BlockHeader}"/>
+                    <TextBlock Text="오늘 나온 사람을 체크하세요. 체크한 사람이 위에서부터 순서대로 들어갑니다."
+                               FontSize="11" Foreground="#718096" Margin="0,0,0,4"/>
+                    <DataGrid ItemsSource="{Binding People}" AutoGenerateColumns="False" CanUserAddRows="False"
+                              HeadersVisibility="Column" GridLinesVisibility="Horizontal" RowHeight="28" MaxHeight="360"
+                              BorderBrush="#E2E8F0" HorizontalGridLinesBrush="#EDF2F7">
+                        <DataGrid.Columns>
+                            <DataGridTemplateColumn Header="출근" Width="44">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <CheckBox IsChecked="{Binding IsChecked, UpdateSourceTrigger=PropertyChanged}"
+                                                  HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTextColumn Header="성명" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="90"/>
+                            <DataGridTextColumn Header="직종" Binding="{Binding Job, UpdateSourceTrigger=PropertyChanged}" Width="80"/>
+                            <DataGridTextColumn Header="작업내용" Binding="{Binding Task, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
+                            <DataGridTemplateColumn Width="34">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <Button Content="✕" Command="{Binding RemoveCommand}" Style="{StaticResource DelBtn}"
+                                                ToolTip="사람 목록에서 지우기"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                    <DockPanel Margin="0,6,0,0">
+                        <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
+                            <Button Content="+ 사람 추가" Command="{Binding AddPersonCommand}" Style="{StaticResource AddBtn}" Margin="0,0,6,0"/>
+                            <Button Content="모두 체크" Command="{Binding CheckAllCommand}" Style="{StaticResource AddBtn}" Margin="0,0,6,0"/>
+                            <Button Content="모두 해제" Command="{Binding UncheckAllCommand}" Style="{StaticResource AddBtn}"/>
+                        </StackPanel>
+                        <TextBlock Text="{Binding CountText}" TextAlignment="Right" VerticalAlignment="Center"
+                                   Foreground="#2B6CB0" TextWrapping="Wrap" Margin="8,0,0,0"/>
+                    </DockPanel>
+                </StackPanel>
+            </Border>
+        </DataTemplate>
+
+        <DataTemplate DataType="{x:Type vm:CalcInputViewModel}">
+            <Border Style="{StaticResource BlockCard}" Background="#F7FAFC">
+                <StackPanel>
+                    <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource BlockHeader}"/>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="{Binding Formula}" Foreground="#718096" VerticalAlignment="Center"/>
+                        <TextBlock Text="  →  " Foreground="#A0AEC0" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding Result}" FontWeight="SemiBold" Foreground="#2B6CB0" VerticalAlignment="Center"/>
+                        <TextBlock Text="  (자동 계산)" FontSize="11" Foreground="#A0AEC0" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </DataTemplate>
     </Window.Resources>
 
     <Grid>
@@ -447,12 +614,28 @@
                             <Button Content="오늘" Padding="10,0" Margin="4,0,0,0"
                                     Command="{Binding TodayCommand}" Background="White" BorderBrush="#CBD5E0" Cursor="Hand"/>
                         </StackPanel>
-                        <TextBlock Grid.Column="5" Text="날씨" Style="{StaticResource LabelStyle}"/>
+                        <TextBlock Grid.Column="5" Text="날씨" Style="{StaticResource LabelStyle}"
+                                   Visibility="{Binding UsesWeather, Converter={StaticResource BoolVis}}"/>
                         <ComboBox Grid.Column="6"
                                   ItemsSource="{Binding WeatherOptions}"
-                                  SelectedItem="{Binding Weather, Mode=TwoWay}"/>
+                                  SelectedItem="{Binding Weather, Mode=TwoWay}"
+                                  Visibility="{Binding UsesWeather, Converter={StaticResource BoolVis}}"/>
                     </Grid>
                 </GroupBox>
+                </StackPanel>
+
+                <!-- ══════════════ 단계: 항목 입력 (블록) ══════════════
+                     설정에서 만든 블록마다 카드 하나. 카드 모양은 Window.Resources 의 DataTemplate 이 종류마다 정한다 -->
+                <StackPanel Visibility="{Binding ShowBlocksStep, Converter={StaticResource BoolVis}}">
+                    <TextBlock Text="설정에서 만든 항목입니다. 같은 이름 항목은 여러 문서에 한 번에 들어갑니다."
+                               Foreground="#718096" FontSize="12" Margin="2,0,0,8"/>
+                    <ItemsControl ItemsSource="{Binding BlockInputs}">
+                        <ItemsControl.ItemContainerStyle>
+                            <Style TargetType="ContentPresenter">
+                                <Setter Property="Visibility" Value="{Binding IsVisible, Converter={StaticResource BoolVis}}"/>
+                            </Style>
+                        </ItemsControl.ItemContainerStyle>
+                    </ItemsControl>
                 </StackPanel>
 
                 <!-- ══════════════ 단계: 작업사항 ══════════════ -->

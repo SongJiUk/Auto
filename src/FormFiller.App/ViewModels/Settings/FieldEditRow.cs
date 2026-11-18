@@ -97,6 +97,16 @@ public class FieldEditRow : ViewModelBase
     /// <summary>현재 편집 상태를 FieldConfig로 변환한다.</summary>
     public FieldConfig ToFieldConfig()
     {
+        // 블록은 이 화면에서 이름·칸 주소만 고친다. 나머지 규칙(값 이름·열 역할·계산 등)은 원본 그대로 복사한다.
+        if (BlockTypes.IsBlock(Type))
+        {
+            var copy = System.Text.Json.JsonSerializer.Deserialize<FieldConfig>(
+                           System.Text.Json.JsonSerializer.Serialize(_orig))!;
+            copy.Label = Label;
+            if (!string.IsNullOrWhiteSpace(_orig.Cell) && !string.IsNullOrWhiteSpace(_cellAddress)) copy.Cell = _cellAddress;
+            return copy;
+        }
+
         var fc = BuildFieldConfig();
         // 이 화면에서 편집하지 않는 값은 원본 그대로 보존
         fc.Suffix      = _orig.Suffix;
@@ -106,6 +116,8 @@ public class FieldEditRow : ViewModelBase
         fc.Presets     = _orig.Presets;
         fc.Placeholder = _orig.Placeholder;
         fc.SpecCol     = _orig.SpecCol;
+        fc.Sheet       = _orig.Sheet;
+        fc.ShapeIndexes = _orig.ShapeIndexes;
         // 여러 줄 칸: 시작 칸을 안 바꿨으면 원래 칸 목록(줄 수 포함) 유지
         if (Type == FieldTypes.Multiline && _orig.Cells is { Count: > 0 }
             && string.Equals(_orig.Cells[0], _cellAddress, StringComparison.OrdinalIgnoreCase))

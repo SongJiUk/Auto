@@ -171,6 +171,94 @@
                         </StackPanel>
                     </WrapPanel>
 
+                    <!-- ── 블록 규칙 (종류마다 다른 칸) ── -->
+                    <StackPanel Margin="22,6,0,0" Visibility="{Binding IsBlock, Converter={StaticResource BoolVis}}">
+                        <!-- 값 이름: 같은 이름이면 다른 문서와 같은 입력 -->
+                        <DockPanel Margin="0,0,0,4" Visibility="{Binding HasKey, Converter={StaticResource BoolVis}}">
+                            <TextBlock Text="값 이름" Style="{StaticResource LabelStyle}" FontSize="11" Width="62"/>
+                            <TextBlock DockPanel.Dock="Right" Text="{Binding KeyHint}" FontSize="10" Foreground="#A0AEC0"
+                                       VerticalAlignment="Center" Margin="6,0,0,0"/>
+                            <TextBox Text="{Binding Key, UpdateSourceTrigger=PropertyChanged}" FontSize="11" Padding="3,1"
+                                     ToolTip="다른 문서에 같은 이름의 항목이 있으면 메인 화면에서 한 번만 입력합니다 (예: 날씨)"/>
+                        </DockPanel>
+
+                        <!-- 값: 어디서 -->
+                        <StackPanel Visibility="{Binding IsValue, Converter={StaticResource BoolVis}}">
+                            <DockPanel Margin="0,0,0,4">
+                                <TextBlock Text="값은" Style="{StaticResource LabelStyle}" FontSize="11" Width="62"/>
+                                <ComboBox ItemsSource="{Binding ValueSources}" SelectedItem="{Binding ValueSource}" FontSize="11"/>
+                            </DockPanel>
+                            <DockPanel Margin="0,0,0,4" Visibility="{Binding IsFixedValue, Converter={StaticResource BoolVis}}">
+                                <TextBlock Text="고정값" Style="{StaticResource LabelStyle}" FontSize="11" Width="62"/>
+                                <TextBox Text="{Binding FixedValue, UpdateSourceTrigger=PropertyChanged}" FontSize="11" Padding="3,1"
+                                         ToolTip="매일 이 값을 씁니다 (예: 100)"/>
+                            </DockPanel>
+                        </StackPanel>
+
+                        <!-- 날짜: 형식 + 미리보기 -->
+                        <DockPanel Margin="0,0,0,4" Visibility="{Binding IsDate, Converter={StaticResource BoolVis}}">
+                            <TextBlock Text="형식" Style="{StaticResource LabelStyle}" FontSize="11" Width="62"/>
+                            <TextBlock DockPanel.Dock="Right" Text="{Binding DatePreview}" FontSize="11" Foreground="#2B6CB0"
+                                       VerticalAlignment="Center" Margin="6,0,0,0"/>
+                            <!-- IsEditable: 목록에 없는 형식도 직접 적을 수 있다 ({yyyy} {yy} {MM} {M} {dd} {d} {요일} {요}) -->
+                            <ComboBox ItemsSource="{Binding DateFormats}" Text="{Binding DateFormat, UpdateSourceTrigger=PropertyChanged}"
+                                      IsEditable="True" FontSize="11"
+                                      ToolTip="{}{yyyy}=2026 {yy}=26 {MM}=11 {M}=3 {dd}=05 {d}=5 {요일}=수요일 {요}=수"/>
+                        </DockPanel>
+
+                        <!-- 여러 줄: 앞 글자, 처음 값 -->
+                        <StackPanel Visibility="{Binding IsLines, Converter={StaticResource BoolVis}}">
+                            <DockPanel Margin="0,0,0,4">
+                                <TextBlock Text="앞 글자" Style="{StaticResource LabelStyle}" FontSize="11" Width="62"/>
+                                <TextBox Text="{Binding Prefix, UpdateSourceTrigger=PropertyChanged}" Width="50" FontSize="11" Padding="3,1"
+                                         HorizontalAlignment="Left" ToolTip="줄마다 앞에 붙일 글자 (예: '- '). 없으면 비워 두세요"/>
+                            </DockPanel>
+                            <DockPanel Margin="0,0,0,4">
+                                <TextBlock Text="처음 값" Style="{StaticResource LabelStyle}" FontSize="11" Width="62"/>
+                                <ComboBox ItemsSource="{Binding StartFromChoices}" SelectedValuePath="Value"
+                                          SelectedValue="{Binding StartFrom}" FontSize="11"/>
+                            </DockPanel>
+                        </StackPanel>
+
+                        <!-- 숫자 누계: 칸 3개 -->
+                        <WrapPanel Margin="0,0,0,4" Visibility="{Binding IsCounter, Converter={StaticResource BoolVis}}">
+                            <Button Content="누계 칸" Command="{Binding PickTotalCommand}" Style="{StaticResource SmallBtn}"/>
+                            <Button Content="전일 칸 (선택)" Command="{Binding PickPrevCommand}" Style="{StaticResource SmallBtn}"/>
+                        </WrapPanel>
+
+                        <!-- 표: 명단에서 세기 -->
+                        <StackPanel Visibility="{Binding IsTable, Converter={StaticResource BoolVis}}">
+                            <DockPanel Margin="0,0,0,4">
+                                <TextBlock Text="금일 값" Style="{StaticResource LabelStyle}" FontSize="11" Width="62"/>
+                                <ComboBox Text="{Binding RosterKey, UpdateSourceTrigger=PropertyChanged}" IsEditable="True"
+                                          ItemsSource="{Binding OtherKeys}" FontSize="11"
+                                          ToolTip="비우면 메인 화면에서 직접 입력. 명단 항목 이름을 적으면 그 명단에서 직종별로 셉니다"/>
+                            </DockPanel>
+                            <TextBlock Text="↑ 비우면 직접 입력 / 명단 이름을 적으면 직종별로 자동으로 셉니다" FontSize="10"
+                                       Foreground="#A0AEC0" Margin="62,0,0,4"/>
+                            <DockPanel Margin="0,0,0,4">
+                                <TextBlock Text="짝짓기" Style="{StaticResource LabelStyle}" FontSize="11" Width="62"/>
+                                <TextBox Text="{Binding RoleMapText, UpdateSourceTrigger=PropertyChanged}" FontSize="11" Padding="3,1"
+                                         ToolTip="표의 줄 이름 = 셀 직종들. 예) 관리자 = 소장, 차장, 대리 / 장비 = 장비. 없으면 줄 이름과 같은 직종을 셉니다"/>
+                            </DockPanel>
+                            <TextBlock Text="예) 관리자 = 소장, 차장, 대리 / 장비 = 장비" FontSize="10" Foreground="#A0AEC0" Margin="62,0,0,4"/>
+                        </StackPanel>
+
+                        <!-- 계산 -->
+                        <StackPanel Visibility="{Binding IsCalc, Converter={StaticResource BoolVis}}">
+                            <DockPanel Margin="0,0,0,4">
+                                <TextBlock Text="계산" Style="{StaticResource LabelStyle}" FontSize="11" Width="62"/>
+                                <ComboBox ItemsSource="{Binding CalcKinds}" SelectedItem="{Binding CalcKind}" FontSize="11"/>
+                            </DockPanel>
+                            <DockPanel Margin="0,0,0,2">
+                                <TextBlock Text="쓸 항목" Style="{StaticResource LabelStyle}" FontSize="11" Width="62"/>
+                                <TextBox Text="{Binding SourcesText, UpdateSourceTrigger=PropertyChanged}" FontSize="11" Padding="3,1"
+                                         ToolTip="항목 이름을 쉼표로 (예: 인원, 수장재 인원)"/>
+                            </DockPanel>
+                            <TextBlock Text="{Binding KnownKeysText}" FontSize="10" Foreground="#A0AEC0" TextWrapping="Wrap" Margin="62,0,0,4"/>
+                        </StackPanel>
+                    </StackPanel>
+
                     <!-- 그림 위치: 저장된 위치 목록 + 지금 위치 저장 -->
                     <StackPanel Margin="22,6,0,0" Visibility="{Binding IsShape, Converter={StaticResource BoolVis}}">
                         <ItemsControl ItemsSource="{Binding Presets}">
@@ -375,6 +463,15 @@
 
                     <!-- 항목 -->
                     <TextBlock Text="채울 항목" Style="{StaticResource SectionTitle}"/>
+                    <Border Background="#FFFAF0" BorderBrush="#F6AD55" BorderThickness="1" CornerRadius="4" Padding="8,6" Margin="0,0,0,8"
+                            Visibility="{Binding HasLegacyItems, Converter={StaticResource BoolVis}}">
+                        <DockPanel>
+                            <Button DockPanel.Dock="Right" Content="블록 방식으로 바꾸기" Command="{Binding ConvertToBlocksCommand}"
+                                    Style="{StaticResource SmallBtn}" Margin="6,0,0,0"/>
+                            <TextBlock Text="예전 방식 항목이 있습니다. 바꾸면 같은 칸·같은 결과로, 규칙을 직접 고를 수 있게 됩니다."
+                                       FontSize="11" Foreground="#7B341E" TextWrapping="Wrap"/>
+                        </DockPanel>
+                    </Border>
                     <TextBlock FontSize="12" Foreground="#A0AEC0" TextWrapping="Wrap" Margin="0,0,0,8"
                                Visibility="{Binding HasNoItems, Converter={StaticResource BoolVis}}">
                         [+ 항목 추가]를 누르고 종류를 고른 뒤, 왼쪽 Excel 에서 그 칸을 클릭하세요.
@@ -388,7 +485,9 @@
                         <StackPanel>
                             <TextBlock Text="종류" Foreground="#4A5568" Margin="0,0,0,4"/>
                             <ListBox ItemsSource="{Binding ItemTypes}" SelectedItem="{Binding NewItemType}"
-                                     DisplayMemberPath="Display" MaxHeight="230" BorderBrush="#E2E8F0"/>
+                                     DisplayMemberPath="Display" MaxHeight="280" BorderBrush="#E2E8F0"/>
+                            <TextBlock Text="{Binding NewItemType.Hint}" FontSize="11" Foreground="#718096" TextWrapping="Wrap"
+                                       Margin="0,6,0,0" Visibility="{Binding NewItemType.HasHint, Converter={StaticResource BoolVis}}"/>
                             <TextBlock Text="이름" Foreground="#4A5568" Margin="0,8,0,4"/>
                             <TextBox Text="{Binding NewItemLabel, UpdateSourceTrigger=PropertyChanged}"
                                      ToolTip="예: 10시 측정, 장비 위치"/>
