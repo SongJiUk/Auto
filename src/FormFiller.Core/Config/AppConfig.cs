@@ -41,6 +41,21 @@ public class AppConfig
 
     /// <summary>처음 실행할 때 사용법 창을 이미 보여 줬는지 (false 면 시작할 때 자동으로 연다)</summary>
     public bool HelpShown { get; set; } = false;
+
+    /// <summary>
+    /// 명단 블록에서 고르는 사람 목록 (이름·직종·기본 작업내용).
+    /// 이름이 들어 있어 이 파일(config.json)은 GitHub 에 올리지 않는다. 명단 파일에서 처음 읽은 사람은 자동으로 추가된다.
+    /// </summary>
+    public List<PersonConfig> People { get; set; } = [];
+}
+
+/// <summary>명단 블록의 사람 한 명</summary>
+public class PersonConfig
+{
+    public string Name { get; set; } = "";
+    public string Role { get; set; } = "";
+    /// <summary>기본 작업내용 (매일 바꿀 수 있음)</summary>
+    public string Task { get; set; } = "";
 }
 
 /// <summary>
@@ -236,6 +251,60 @@ public class FieldConfig
     /// <summary>저장해 둔 위치 목록. 매일 이 중 하나를 고른다.</summary>
     public List<ShapePreset>? Presets { get; set; }
 
+    // ── 블록 (2026-11-18): 사용자가 규칙을 고르는 범용 항목 ─────────────
+    // 종류: value · date · lines · counter · table · roster · calc (BlockTypes 참고)
+
+    /// <summary>
+    /// 이 항목을 쓸 시트. 비어 있으면 문서의 "적용할 시트" 전부에 쓴다.
+    /// 한 파일 안에서 다른 시트에 있는 칸(예: 공사일보 파일의 출력일보 시트 명단)을 지정할 때 쓴다.
+    /// </summary>
+    public string? Sheet { get; set; }
+
+    /// <summary>
+    /// 값 이름. 같은 이름의 블록은 여러 문서에서 같은 입력을 함께 쓴다 (예: "날씨"를 공사일보·TBM 에서 한 번만 입력).
+    /// 비어 있으면 Label 을 쓴다.
+    /// </summary>
+    public string? Key { get; set; }
+
+    /// <summary>value: 값을 어디서 가져올지 — "input"(매일 입력, 기본) | "keep"(어제 값 그대로, 쓰지 않음) | "fixed"(고정값)</summary>
+    public string? ValueSource { get; set; }
+
+    /// <summary>value: 고정값 (ValueSource = "fixed")</summary>
+    public string? FixedValue { get; set; }
+
+    /// <summary>date: 날짜 형식. {yyyy} {yy} {MM} {M} {dd} {d} {요일} {요} (예: "{yyyy}년 {MM}월 {dd}일 {요일}")</summary>
+    public string? DateFormat { get; set; }
+
+    /// <summary>lines: 줄마다 앞에 붙일 글자 (예: "- "). 이미 붙어 있으면 다시 붙이지 않는다.</summary>
+    public string? Prefix { get; set; }
+
+    /// <summary>lines: 처음 보여 줄 값 — 비어 있으면 빈 칸, "same" 이면 어제 이 블록, 다른 블록 이름이면 어제 그 블록 (예: 금일 ← 어제 명일)</summary>
+    public string? StartFrom { get; set; }
+
+    /// <summary>counter: 누계 칸 (누계 = 어제 누계 + 오늘). 오늘 칸은 Cell.</summary>
+    public string? TotalCell { get; set; }
+
+    /// <summary>counter: 전일(어제까지 누계) 칸 (선택)</summary>
+    public string? PrevCell { get; set; }
+
+    /// <summary>table · roster: 열마다 역할 (StartRow~EndRow 범위)</summary>
+    public List<ColumnRole>? Columns { get; set; }
+
+    /// <summary>calc: "sum"(합계) | "names"(금일 0 보다 큰 줄 이름 나열) | "count"(명단 인원 수)</summary>
+    public string? CalcKind { get; set; }
+
+    /// <summary>calc: 계산에 쓸 블록 이름들</summary>
+    public List<string>? Sources { get; set; }
+
+    /// <summary>table: 금일 값을 이 명단 블록에서 직종별로 세어 채운다 (비어 있으면 화면에서 입력)</summary>
+    public string? RosterKey { get; set; }
+
+    /// <summary>
+    /// table + RosterKey: 표의 줄 이름 → 그 줄에 셀 명단 직종들. 없으면 줄 이름과 같은 직종을 센다.
+    /// 예) "관리자" → ["소장","차장","대리"]
+    /// </summary>
+    public Dictionary<string, List<string>>? RoleMap { get; set; }
+
     // ── 한글(hwpx) 용 ────────────────────────────────────────────────
 
     /// <summary>
@@ -243,6 +312,15 @@ public class FieldConfig
     /// 한글에서 서식의 해당 자리에 이 글자를 적어 두면 생성할 때 값으로 바뀐다.
     /// </summary>
     public string? Placeholder { get; set; }
+}
+
+/// <summary>표·명단 블록의 열 하나와 그 역할 (BlockTypes.Role* 참고)</summary>
+public class ColumnRole
+{
+    /// <summary>열 문자 (예: "A")</summary>
+    public string Col { get; set; } = "";
+    /// <summary>역할 (예: "name", "today")</summary>
+    public string Role { get; set; } = "";
 }
 
 /// <summary>

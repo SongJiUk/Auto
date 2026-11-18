@@ -83,6 +83,15 @@ public class DailyInput
     /// </summary>
     public Dictionary<string, string> DocValues { get; set; } = [];
 
+    /// <summary>
+    /// 블록(value·lines·counter·table·roster) 값. 키는 블록 이름(BlockTypes.KeyOf).
+    /// 같은 이름 블록은 여러 문서가 함께 쓴다.
+    /// </summary>
+    public Dictionary<string, BlockValue> Blocks { get; set; } = [];
+
+    /// <summary>블록 값 (없으면 빈 값)</summary>
+    public BlockValue Block(string key) => Blocks.TryGetValue(key, out var v) ? v : new BlockValue();
+
     /// <summary>photo 필드의 짝 값(측정값)을 저장할 때 필드 ID 뒤에 붙이는 표시</summary>
     public const string ValueSuffixKey = "#value";
 

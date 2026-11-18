@@ -61,7 +61,9 @@ public static class OutputVerifier
 
             // 3·4. 시트마다 그림
             var movable = MovableShapeIndexes(doc);
-            foreach (string sheet in doc.TargetSheets())
+            var sheets = doc.TargetSheets().Concat(doc.Fields.Select(f => f.Sheet)
+                            .Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x!.Trim())).Distinct();
+            foreach (string sheet in sheets)
             {
                 var srcWs = CellHelper.FindWorksheetPart(source.WorkbookPart!, sheet);
                 var outWs = CellHelper.FindWorksheetPart(output.WorkbookPart!, sheet);

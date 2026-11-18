@@ -203,6 +203,9 @@ public static class GenericExcelWriter
         DateTime docDate = DocumentSchedule.DocumentDate(docConfig, input.Date);
         if (docDate != input.Date.Date) input = input.WithDate(docDate);
 
+        // 명단과 연결된 표는 금일을 명단에서 센다 (화면에서도 하지만, 엔진만 쓸 때도 맞게)
+        BlockEngine.ApplyRosterCounts(input, docConfig.Fields, notes);
+
         // ── 1. 경로 계산 ─────────────────────────────────────────────
         string templatePath = Path.Combine(baseDir, docConfig.TemplateFile);
         string outputPath   = BuildOutputPath(input.Date, docConfig.OutputPattern, baseDir, outputFolder);
@@ -238,7 +241,7 @@ public static class GenericExcelWriter
         {
             var wbPart = doc.WorkbookPart!;
 
-            // 시트마다 fields 순회 (같은 모양 시트 여러 개면 모두 채운다)
+            // 시트마다 fields 순회 (같은 모양 시트 여러 개면 모두 채운다). 시트를 따로 정한 항목은 그 시트에만.
             foreach (string sheet in docConfig.TargetSheets())
             {
                 var wsPart = CellHelper.FindWorksheetPart(wbPart, sheet)
@@ -246,8 +249,19 @@ public static class GenericExcelWriter
                                     $"시트 '{sheet}'를 찾을 수 없습니다.\n파일: {outputPath}");
 
                 var ctx = new WriteContext(input, docConfig, sheet, doc, wsPart, photoLoader, notes);
-                foreach (var field in docConfig.Fields)
+                foreach (var field in docConfig.Fields.Where(f => string.IsNullOrWhiteSpace(f.Sheet)))
                     WriteField(field, ctx);
+            }
+            foreach (var group in docConfig.Fields.Where(f => !string.IsNullOrWhiteSpace(f.Sheet)).GroupBy(f => f.Sheet!.Trim()))
+            {
+                var wsPart = CellHelper.FindWorksheetPart(wbPart, group.Key);
+                if (wsPart == null)
+                {
+                    notes?.Add($"{docConfig.Name}: 시트 '{group.Key}' 가 없어 {string.Join(", ", group.Select(f => f.Label))} 을(를) 쓰지 못함");
+                    continue;
+                }
+                var ctx = new WriteContext(input, docConfig, group.Key, doc, wsPart, photoLoader, notes);
+                foreach (var field in group) WriteField(field, ctx);
             }
 
             // 수식 재계산 플래그 설정 (누계·합계 수식 보장)
@@ -302,6 +316,7 @@ public static class GenericExcelWriter
             FieldTypes.TbmPersonnel         => input.TotalPersonnelWithSujangjae.ToString(),
             FieldTypes.AttendanceRate       => "100",
             FieldTypes.Input                => WithSuffix(input.GetDocValue(docId, sheet, field.Id), field.Suffix),
+            _ when BlockTypes.IsBlock(field.Type) => BlockEngine.TextFor(field, input),
             _                               => null,
         };
 
@@ -338,6 +353,13 @@ public static class GenericExcelWriter
         var input     = c.Input;
         var docConfig = c.Doc;
         var wsPart    = c.Ws;
+
+        // 블록(사용자가 규칙을 고른 범용 항목)은 BlockEngine 이 쓴다
+        if (BlockTypes.IsBlock(field.Type))
+        {
+            BlockEngine.Write(field, c.Package, wsPart, input, c.Sheet, c.Notes);
+            return;
+        }
 
         switch (field.Type)
         {

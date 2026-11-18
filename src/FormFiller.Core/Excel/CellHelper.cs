@@ -130,6 +130,24 @@ public static class CellHelper
         cell.CellValue = new CellValue(value.ToString());
     }
 
+    /// <summary>셀에 숫자(소수 포함)를 쓴다. 3.0 → "3", 2.50 → "2.5"</summary>
+    public static void SetCellNumber(WorksheetPart wsPart, string cellAddress, decimal value)
+    {
+        var cell = GetOrCreateCell(wsPart.Worksheet, cellAddress);
+        cell.InlineString?.Remove();
+        cell.DataType  = null;
+        cell.CellValue = new CellValue(value.ToString("0.############", System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>셀의 숫자 값 (소수 포함). 숫자가 아니면 null.</summary>
+    public static decimal? GetCellDecimal(WorksheetPart wsPart, string cellAddress)
+    {
+        string? raw = GetCellValue(wsPart, cellAddress);
+        if (raw == null) return null;
+        return decimal.TryParse(raw, System.Globalization.NumberStyles.Float,
+                                System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : null;
+    }
+
     // ── fullCalcOnLoad 설정 ───────────────────────────────────────────
 
     /// <summary>
