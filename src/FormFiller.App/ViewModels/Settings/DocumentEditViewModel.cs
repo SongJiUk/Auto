@@ -51,13 +51,29 @@ public class DocumentEditViewModel : ViewModelBase
     public FrequencyOption SelectedFrequency
     {
         get => _selectedFrequency;
-        set { if (SetField(ref _selectedFrequency, value)) OnPropertyChanged(nameof(IsCustomFrequency)); }
+        set
+        {
+            if (!SetField(ref _selectedFrequency, value)) return;
+            OnPropertyChanged(nameof(IsCustomFrequency));
+            OnPropertyChanged(nameof(IsWeeklyFrequency));
+        }
     }
 
     public bool IsCustomFrequency => _selectedFrequency?.Value == "custom";
 
     private int _frequencyDays;
     public int FrequencyDays { get => _frequencyDays; set => SetField(ref _frequencyDays, value); }
+
+    // ── 매주 주기: 요일 + 파일 날짜 ──────────────────────────────────
+    public bool IsWeeklyFrequency => _selectedFrequency?.Value == "weekly";
+    public IReadOnlyList<WeekdayOption> WeekdayOptions { get; } = WeekdayOption.All;
+
+    private WeekdayOption _selectedWeekday = WeekdayOption.Of(DayOfWeek.Monday);
+    public WeekdayOption SelectedWeekday { get => _selectedWeekday; set => SetField(ref _selectedWeekday, value); }
+
+    private bool _useWeeklyDayDate;
+    /// <summary>true: 그 주 정한 요일 날짜로 파일을 만든다 / false: 만드는 날 날짜</summary>
+    public bool UseWeeklyDayDate { get => _useWeeklyDayDate; set => SetField(ref _useWeeklyDayDate, value); }
 
     // ── 수장재팀 포함 여부 ────────────────────────────────────────────
 
@@ -126,6 +142,8 @@ public class DocumentEditViewModel : ViewModelBase
         _outputPattern     = doc.OutputPattern;
         _selectedSheet     = doc.SheetName;
         _frequencyDays     = doc.FrequencyDays;
+        _selectedWeekday   = WeekdayOption.Of(doc.WeeklyDay);
+        _useWeeklyDayDate  = doc.UseWeeklyDayDate;
         _includesSujangjae = doc.IncludesSujangjae;
 
         // 저장된 photoSheet 값을 선택 상태로 복원 (ReloadSheets 후에 처리)
@@ -225,6 +243,8 @@ public class DocumentEditViewModel : ViewModelBase
         SheetName         = SelectedSheet,
         Frequency         = _selectedFrequency?.Value ?? "daily",
         FrequencyDays     = IsCustomFrequency ? FrequencyDays : 0,
+        WeeklyDay         = SelectedWeekday.Value,
+        UseWeeklyDayDate  = IsWeeklyFrequency && UseWeeklyDayDate,
         IncludesSujangjae = IncludesSujangjae,
         PhotoSheet        = PhotoSheet,
         PhotoSlots        = PhotoSlotRows.Select(r => r.ToConfig()).ToList(),

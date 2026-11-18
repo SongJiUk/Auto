@@ -89,7 +89,7 @@ public class DocumentConfig
     public List<FieldConfig> Fields { get; set; } = [];
 
     /// <summary>
-    /// 생성 주기. "daily" | "biweekly" | "monthly" | "custom"
+    /// 생성 주기. "daily" | "weekly" | "biweekly" | "monthly" | "custom"
     /// </summary>
     public string Frequency { get; set; } = "daily";
 
@@ -97,6 +97,17 @@ public class DocumentConfig
     /// custom 주기일 때 며칠마다 생성하는지 (예: 7 = 1주마다)
     /// </summary>
     public int FrequencyDays { get; set; } = 1;
+
+    /// <summary>
+    /// weekly 주기일 때 만드는 요일 (기본 월요일). config.json 에는 숫자로 저장된다 (0=일요일, 1=월요일 … 6=토요일).
+    /// </summary>
+    public DayOfWeek WeeklyDay { get; set; } = DayOfWeek.Monday;
+
+    /// <summary>
+    /// weekly 주기일 때 파일 날짜를 어떻게 정할지.
+    /// false(기본): 만드는 날 날짜 / true: 그 주의 WeeklyDay 날짜 (예: 수요일에 만들어도 월요일 날짜로)
+    /// </summary>
+    public bool UseWeeklyDayDate { get; set; } = false;
 
     /// <summary>
     /// 수장재팀 인원을 포함해서 계산하는지 여부.

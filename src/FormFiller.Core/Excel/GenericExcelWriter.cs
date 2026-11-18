@@ -192,11 +192,17 @@ public static class GenericExcelWriter
     /// (사진 처리는 화면 쪽(WPF) 기능이라 App 에서 넘겨받는다)
     /// </param>
     /// <param name="notes">사용자에게 보여 줄 참고 사항(빈 칸 등)을 모을 목록 (선택)</param>
+    /// <param name="problems">주면 저장 후 자동 검증(OutputVerifier)을 하고 찾은 문제를 여기에 담는다 (선택)</param>
     public static string Generate(DailyInput input, DocumentConfig docConfig,
                                   string baseDir, string outputFolder,
                                   Func<string, int, int, byte[]>? photoLoader = null,
-                                  List<string>? notes = null)
+                                  List<string>? notes = null,
+                                  List<string>? problems = null)
     {
+        // ── 0. 문서 날짜 (매주 문서는 설정에 따라 그 주 정한 요일 날짜) ──
+        DateTime docDate = DocumentSchedule.DocumentDate(docConfig, input.Date);
+        if (docDate != input.Date.Date) input = input.WithDate(docDate);
+
         // ── 1. 경로 계산 ─────────────────────────────────────────────
         string templatePath = Path.Combine(baseDir, docConfig.TemplateFile);
         string outputPath   = BuildOutputPath(input.Date, docConfig.OutputPattern, baseDir, outputFolder);
@@ -219,6 +225,7 @@ public static class GenericExcelWriter
         {
             EnsureDirectoryExists(outputPath);
             HwpxWriter.Generate(templatePath, outputPath, docConfig, input, notes);
+            problems?.AddRange(OutputVerifier.Verify(templatePath, outputPath, docConfig));
             return outputPath;
         }
 
@@ -226,25 +233,30 @@ public static class GenericExcelWriter
         EnsureDirectoryExists(outputPath);
         File.Copy(basePath, outputPath, overwrite: true);
 
-        // ── 3. 복사본을 편집 모드로 열기 ─────────────────────────────
-        using var doc    = SpreadsheetDocument.Open(outputPath, isEditable: true);
-        var       wbPart = doc.WorkbookPart!;
-
-        // ── 4. 시트마다 fields 순회 (같은 모양 시트 여러 개면 모두 채운다) ─
-        foreach (string sheet in docConfig.TargetSheets())
+        // ── 3~5. 복사본을 열어 칸을 채우고 저장 (using 블록이 끝나면 파일이 닫힌다) ──
+        using (var doc = SpreadsheetDocument.Open(outputPath, isEditable: true))
         {
-            var wsPart = CellHelper.FindWorksheetPart(wbPart, sheet)
-                         ?? throw new InvalidOperationException(
-                                $"시트 '{sheet}'를 찾을 수 없습니다.\n파일: {outputPath}");
+            var wbPart = doc.WorkbookPart!;
 
-            var ctx = new WriteContext(input, docConfig, sheet, doc, wsPart, photoLoader, notes);
-            foreach (var field in docConfig.Fields)
-                WriteField(field, ctx);
+            // 시트마다 fields 순회 (같은 모양 시트 여러 개면 모두 채운다)
+            foreach (string sheet in docConfig.TargetSheets())
+            {
+                var wsPart = CellHelper.FindWorksheetPart(wbPart, sheet)
+                             ?? throw new InvalidOperationException(
+                                    $"시트 '{sheet}'를 찾을 수 없습니다.\n파일: {outputPath}");
+
+                var ctx = new WriteContext(input, docConfig, sheet, doc, wsPart, photoLoader, notes);
+                foreach (var field in docConfig.Fields)
+                    WriteField(field, ctx);
+            }
+
+            // 수식 재계산 플래그 설정 (누계·합계 수식 보장)
+            CellHelper.SetFullCalcOnLoad(wbPart);
+            wbPart.Workbook.Save();
         }
 
-        // ── 5. 수식 재계산 플래그 설정 (J열·R열·합계행 수식 보장) ────
-        CellHelper.SetFullCalcOnLoad(wbPart);
-        wbPart.Workbook.Save();
+        // ── 6. 저장 후 자동 검증: 닫은 파일을 다시 열어 바탕 파일과 비교 ──
+        problems?.AddRange(OutputVerifier.Verify(basePath, outputPath, docConfig));
 
         return outputPath;
     }
@@ -308,6 +320,13 @@ public static class GenericExcelWriter
         CellHelper.SetCellString(c.Package, c.Ws, cell, value);
     }
 
+    /// <summary>숫자를 쓰되, 수식 셀이면 건드리지 않는다 (예: 계획인원 칸이 다른 칸을 참조하는 서식).</summary>
+    private static void WriteInt(WriteContext c, string? cell, int value)
+    {
+        if (string.IsNullOrEmpty(cell) || CellHelper.HasFormula(c.Ws, cell)) return;
+        CellHelper.SetCellInt(c.Ws, cell, value);
+    }
+
     // ── 타입별 처리 ───────────────────────────────────────────────────
 
     /// <summary>
@@ -318,7 +337,6 @@ public static class GenericExcelWriter
     {
         var input     = c.Input;
         var docConfig = c.Doc;
-        var doc       = c.Package;
         var wsPart    = c.Ws;
 
         switch (field.Type)
@@ -361,7 +379,7 @@ public static class GenericExcelWriter
             // ── 멀티라인 텍스트 → 셀 범위에 나눠 쓰기 ───────────────
             case FieldTypes.Multiline:
                 if (field.Cells is { Count: > 0 })
-                    WriteMultiline(doc, wsPart, GetMultilineValue(field.Id, input), field.Cells);
+                    WriteMultiline(c, GetMultilineValue(field.Id, input), field.Cells);
                 break;
 
             // ── 장비 투입현황 테이블 ──────────────────────────────────
@@ -377,24 +395,17 @@ public static class GenericExcelWriter
 
             // ── 금일 대수 > 0 장비명 쉼표 연결 ──────────────────────
             case FieldTypes.ActiveEquipmentNames:
-                if (!string.IsNullOrEmpty(field.Cell))
-                {
-                    string names = string.Join(", ",
-                        input.Equipment.Where(e => e.TodayCount > 0).Select(e => e.Name));
-                    CellHelper.SetCellString(doc, wsPart, field.Cell, names);
-                }
+                WriteString(c, field.Cell, GetSimpleValue(field, input, docConfig.Id, c.Sheet) ?? "");
                 break;
 
             // ── TBM 인원 — 수장재 포함 합계 사용 ────────────────────
             case FieldTypes.TbmPersonnel:
-                if (!string.IsNullOrEmpty(field.Cell))
-                    CellHelper.SetCellInt(wsPart, field.Cell, input.TotalPersonnelWithSujangjae);
+                WriteInt(c, field.Cell, input.TotalPersonnelWithSujangjae);
                 break;
 
             // ── 참석율 — 계획 = 실시이므로 항상 100 ─────────────────
             case FieldTypes.AttendanceRate:
-                if (!string.IsNullOrEmpty(field.Cell))
-                    CellHelper.SetCellInt(wsPart, field.Cell, 100);
+                WriteInt(c, field.Cell, 100);
                 break;
         }
     }
@@ -432,16 +443,12 @@ public static class GenericExcelWriter
     /// 멀티라인 텍스트를 셀 범위에 나눠 쓴다.
     /// 텍스트 줄 수가 셀 범위보다 적으면 나머지 셀은 빈 문자열로 클리어한다.
     /// </summary>
-    private static void WriteMultiline(SpreadsheetDocument doc, WorksheetPart wsPart,
-                                       string text, List<string> cells)
+    private static void WriteMultiline(WriteContext c, string text, List<string> cells)
     {
         string[] lines = text.Split(["\r\n", "\n"], StringSplitOptions.None);
 
         for (int i = 0; i < cells.Count; i++)
-        {
-            string value = i < lines.Length ? lines[i] : "";
-            CellHelper.SetCellString(doc, wsPart, cells[i], value);
-        }
+            WriteString(c, cells[i], i < lines.Length ? lines[i] : "");   // 수식 칸은 건너뛴다
     }
 
     /// <summary>장비 투입현황: 장비명 열로 줄을 찾아 전일·금일을 쓴다.</summary>
@@ -548,6 +555,10 @@ public static class GenericExcelWriter
     /// OutputPattern 의 {yy}, {MM}, {dd} 를 날짜로 치환해 출력 경로를 반환한다.
     /// 예) "공사일보_출력일보_{yy}.{MM}.{dd}.xlsx" → ".../output/공사일보_출력일보_26.11.05.xlsx"
     /// </summary>
+    /// <summary>이 문서를 date 에 만들면 저장될 경로 (매주 문서의 날짜 규칙 반영). 화면의 덮어쓰기 확인 등에 쓴다.</summary>
+    public static string OutputPathFor(DocumentConfig doc, DateTime date, string baseDir, string outputFolder) =>
+        BuildOutputPath(DocumentSchedule.DocumentDate(doc, date), doc.OutputPattern, baseDir, outputFolder);
+
     public static string BuildOutputPath(DateTime date, string outputPattern,
                                           string baseDir, string outputFolder)
     {

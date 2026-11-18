@@ -204,7 +204,15 @@
                                      Style="{StaticResource SmallNum}"/>
                             <TextBlock Text="일" Style="{StaticResource SmallLabel}" Margin="4,0,0,0"/>
                         </StackPanel>
+                        <!-- 매주: 요일 (weekly 선택 시만 표시) -->
+                        <ComboBox ItemsSource="{Binding WeekdayOptions}" SelectedItem="{Binding SelectedWeekday, Mode=TwoWay}"
+                                  DisplayMemberPath="Label" Width="80" Margin="8,0,0,0"
+                                  Visibility="{Binding IsWeeklyFrequency, Converter={StaticResource BoolVis}}"/>
                     </StackPanel>
+                    <CheckBox Content="파일 날짜를 그 주 정한 요일로 (끄면 만드는 날 날짜)"
+                              IsChecked="{Binding UseWeeklyDayDate, Mode=TwoWay}"
+                              Margin="70,0,0,6" Foreground="#4A5568"
+                              Visibility="{Binding IsWeeklyFrequency, Converter={StaticResource BoolVis}}"/>
 
                     <!-- ── 수장재팀 포함 ── -->
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,6">

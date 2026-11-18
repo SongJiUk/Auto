@@ -339,6 +339,14 @@
                                      Visibility="{Binding IsCustomFrequency, Converter={StaticResource BoolVis}}"/>
                             <TextBlock Text="일마다" VerticalAlignment="Center" Foreground="#4A5568"
                                        Visibility="{Binding IsCustomFrequency, Converter={StaticResource BoolVis}}"/>
+                            <!-- 매주: 요일 -->
+                            <ComboBox ItemsSource="{Binding WeekdayOptions}" SelectedItem="{Binding SelectedWeekday}"
+                                      DisplayMemberPath="Label" Width="80" Margin="8,0,0,0"
+                                      Visibility="{Binding IsWeeklyFrequency, Converter={StaticResource BoolVis}}"/>
+                            <CheckBox Content="그 요일 날짜로" Margin="8,0,0,0" VerticalAlignment="Center"
+                                      IsChecked="{Binding UseWeeklyDayDate}" Foreground="#4A5568"
+                                      ToolTip="켜면 수요일에 만들어도 파일 날짜는 그 주 정한 요일. 끄면 만드는 날 날짜."
+                                      Visibility="{Binding IsWeeklyFrequency, Converter={StaticResource BoolVis}}"/>
                         </StackPanel>
 
                         <CheckBox Grid.Row="3" Grid.Column="1" Content="인원에 수장재팀 포함"

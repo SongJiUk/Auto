@@ -178,6 +178,11 @@
                                             </Style>
                                         </TextBlock.Style>
                                     </TextBlock>
+
+                                    <!-- 결과 화면: 저장 후 자동 검증에서 나온 문제 (주황) -->
+                                    <TextBlock Text="{Binding VerifyText}" Margin="0,4,0,0" FontSize="12" TextWrapping="Wrap"
+                                               Foreground="#C05621"
+                                               Visibility="{Binding HasVerifyProblems, Converter={StaticResource BoolVis}}"/>
                                 </StackPanel>
                             </Border>
                         </DataTemplate>

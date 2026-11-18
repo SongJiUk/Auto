@@ -195,7 +195,24 @@ public class DocCheckItem : ViewModelBase
     private string _resultText = "";
     public string ResultText { get => _resultText; private set => SetField(ref _resultText, value); }
 
-    public void SetDone()                { State = DocResultState.Done;   ResultText = "✔ " + OutputFileName; }
+    private string _verifyText = "";
+    /// <summary>저장 후 자동 검증에서 찾은 문제 (주황). 비어 있으면 안 보인다.</summary>
+    public string VerifyText
+    {
+        get => _verifyText;
+        private set { if (SetField(ref _verifyText, value)) OnPropertyChanged(nameof(HasVerifyProblems)); }
+    }
+    public bool HasVerifyProblems => _verifyText.Length > 0;
+
+    /// <param name="verifyProblems">저장 후 자동 검증 결과. 문제가 없으면 비어 있다.</param>
+    public void SetDone(IReadOnlyCollection<string>? verifyProblems = null)
+    {
+        State = DocResultState.Done;
+        bool ok = verifyProblems is not { Count: > 0 };
+        ResultText = (ok ? "✔ " : "⚠ ") + OutputFileName + (ok ? "  (자동 검증 통과)" : "");
+        VerifyText = ok ? "" : "자동 검증에서 확인할 것이 나왔습니다. 엑셀에서 열어 확인해 주세요:\n• "
+                               + string.Join("\n• ", verifyProblems!);
+    }
     public void SetFailed(string reason) { State = DocResultState.Failed; ResultText = "✖ 실패: " + reason; }
     public void SetSkipped()
     {

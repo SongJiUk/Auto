@@ -58,6 +58,25 @@ public class DocInputWriterTests : IDisposable
         r.ValidationErrors().Should().BeEmpty();
     }
 
+    [Fact]
+    public void TBM_수식_칸은_인원_참석율을_덮어쓰지_않는다()
+    {
+        // 계획인원·실시인원·참석율이 다른 칸을 참조하는 서식
+        XlsxBuilder.Create(_dir.File("tbm.xlsx"), new SheetSpec("TBM일지 서식11월")
+        {
+            ["AD6"] = 14, ["I16"] = new F("AD6", "14"), ["O16"] = new F("AD6", "14"), ["U16"] = new F("O16/I16*100", "100"),
+            ["F7"] = new F("공사일보!A20", "B/H"),
+        });
+
+        string path = GenericExcelWriter.Generate(DailyReportSample.Input(Thu), Tbm(), _dir.Path, Out);
+
+        using var r = new XlsxReader(path);
+        const string s = "TBM일지 서식11월";
+        r.Int(s, "AD6").Should().Be(11);
+        foreach (var cell in new[] { "I16", "O16", "U16", "F7" })
+            r.RawCell(s, cell)!.CellFormula.Should().NotBeNull($"{cell} 수식 유지");
+    }
+
     // ── 매일 직접 입력 (시트마다 따로) ─────────────────────────────
 
     private DocumentConfig Noise() => new()

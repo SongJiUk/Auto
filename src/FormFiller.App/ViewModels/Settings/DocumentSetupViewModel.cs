@@ -89,13 +89,29 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
     public FrequencyOption SelectedFrequency
     {
         get => _selectedFrequency;
-        set { if (SetField(ref _selectedFrequency, value)) OnPropertyChanged(nameof(IsCustomFrequency)); }
+        set
+        {
+            if (!SetField(ref _selectedFrequency, value)) return;
+            OnPropertyChanged(nameof(IsCustomFrequency));
+            OnPropertyChanged(nameof(IsWeeklyFrequency));
+        }
     }
 
     public bool IsCustomFrequency => _selectedFrequency?.Value == "custom";
 
     private int _frequencyDays = 7;
     public int FrequencyDays { get => _frequencyDays; set => SetField(ref _frequencyDays, value); }
+
+    // ── 매주 주기: 요일 + 파일 날짜 ──────────────────────────────────
+    public bool IsWeeklyFrequency => _selectedFrequency?.Value == "weekly";
+    public IReadOnlyList<WeekdayOption> WeekdayOptions { get; } = WeekdayOption.All;
+
+    private WeekdayOption _selectedWeekday = WeekdayOption.Of(DayOfWeek.Monday);
+    public WeekdayOption SelectedWeekday { get => _selectedWeekday; set => SetField(ref _selectedWeekday, value); }
+
+    private bool _useWeeklyDayDate;
+    /// <summary>true: 그 주 정한 요일 날짜로 파일을 만든다 / false: 만드는 날 날짜</summary>
+    public bool UseWeeklyDayDate { get => _useWeeklyDayDate; set => SetField(ref _useWeeklyDayDate, value); }
 
     private bool _includesSujangjae;
     public bool IncludesSujangjae { get => _includesSujangjae; set => SetField(ref _includesSujangjae, value); }
@@ -236,6 +252,8 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
         OutputPattern     = doc.OutputPattern;
         SelectedFrequency = FrequencyOption.All.FirstOrDefault(f => f.Value == doc.Frequency) ?? FrequencyOption.All[0];
         FrequencyDays     = doc.FrequencyDays > 0 ? doc.FrequencyDays : 7;
+        SelectedWeekday   = WeekdayOption.Of(doc.WeeklyDay);
+        UseWeeklyDayDate  = doc.UseWeeklyDayDate;
         IncludesSujangjae = doc.IncludesSujangjae;
         _initialSlotLabels = doc.PhotoSlots.ToDictionary(s => s.Index, s => s.Label);
         _selectedPhotoSheet = string.IsNullOrEmpty(doc.PhotoSheet) ? NoPhotoOption : doc.PhotoSheet;
@@ -646,6 +664,8 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
                 SheetNames        = sheets.Count > 1 ? sheets : [],
                 Frequency         = SelectedFrequency.Value,
                 FrequencyDays     = IsCustomFrequency ? FrequencyDays : 0,
+                WeeklyDay         = SelectedWeekday.Value,
+                UseWeeklyDayDate  = IsWeeklyFrequency && UseWeeklyDayDate,
                 IncludesSujangjae = IncludesSujangjae,
                 PhotoSheet        = PhotoSheet,
                 PhotoSlots        = PhotoSlotRows.Select(r => r.ToConfig()).ToList(),
@@ -693,8 +713,28 @@ public class FrequencyOption
     public static readonly IReadOnlyList<FrequencyOption> All =
     [
         new("매일",        "daily"),
+        new("매주",        "weekly"),
         new("2주마다",     "biweekly"),
         new("매월",        "monthly"),
         new("사용자 지정", "custom"),
     ];
+}
+
+// ── WeekdayOption: 매주 주기의 요일 선택 항목 ─────────────────────
+public class WeekdayOption
+{
+    public string    Label { get; }
+    public DayOfWeek Value { get; }
+
+    public WeekdayOption(string label, DayOfWeek value) { Label = label; Value = value; }
+
+    /// <summary>월요일부터 일요일까지 (현장 주간 순서)</summary>
+    public static readonly IReadOnlyList<WeekdayOption> All =
+    [
+        new("월요일", DayOfWeek.Monday), new("화요일", DayOfWeek.Tuesday), new("수요일", DayOfWeek.Wednesday),
+        new("목요일", DayOfWeek.Thursday), new("금요일", DayOfWeek.Friday), new("토요일", DayOfWeek.Saturday),
+        new("일요일", DayOfWeek.Sunday),
+    ];
+
+    public static WeekdayOption Of(DayOfWeek d) => All.First(o => o.Value == d);
 }

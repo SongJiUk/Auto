@@ -88,6 +88,14 @@ public class DailyInput
 
     public static string Key(string docId, string sheet, string fieldId) => $"{docId}|{sheet}|{fieldId}";
 
+    /// <summary>날짜만 바꾼 복사본 (목록·사전은 원본과 같이 쓴다). 매주 문서를 "그 주 월요일 날짜"로 만들 때 쓴다.</summary>
+    public DailyInput WithDate(DateTime date)
+    {
+        var copy = (DailyInput)MemberwiseClone();   // MemberwiseClone: 필드를 그대로 복사한 얕은 복사본
+        copy.Date = date;
+        return copy;
+    }
+
     public string GetDocValue(string docId, string sheet, string fieldId)
         => DocValues.TryGetValue(Key(docId, sheet, fieldId), out var v) ? v : "";
 }

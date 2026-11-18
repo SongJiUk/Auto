@@ -60,6 +60,12 @@ public class MainViewModel : ViewModelBase
     // ── 오늘 생성할 문서 목록 ─────────────────────────────────────────
     public ObservableCollection<DocumentDueItem> DocumentDueList { get; } = [];
 
+    /// <summary>화면 표시용: 매일 업무 / 주기 업무(매주·매월 등). 목록을 다시 읽을 때 함께 바뀐다.</summary>
+    public IEnumerable<DocumentDueItem> DailyDocs    => DocumentDueList.Where(d => d.IsDaily).ToList();
+    public IEnumerable<DocumentDueItem> PeriodicDocs => DocumentDueList.Where(d => !d.IsDaily).ToList();
+    public bool HasDailyDocs    => DocumentDueList.Any(d => d.IsDaily);
+    public bool HasPeriodicDocs => DocumentDueList.Any(d => !d.IsDaily);
+
     // ── 사진 슬롯 ─────────────────────────────────────────────────────
     public ObservableCollection<PhotoSlotViewModel> PhotoSlots { get; } = [];
     public bool HasPhotoSlots => PhotoSlots.Count > 0;
@@ -480,6 +486,10 @@ public class MainViewModel : ViewModelBase
             foreach (var d in g)
                 d.SetDuplicateName(string.Join(", ", g.Where(o => o != d).Select(o => o.Name)));
 
+        OnPropertyChanged(nameof(DailyDocs));
+        OnPropertyChanged(nameof(PeriodicDocs));
+        OnPropertyChanged(nameof(HasDailyDocs));
+        OnPropertyChanged(nameof(HasPeriodicDocs));
         RefreshUsage();
     }
 
@@ -517,8 +527,7 @@ public class MainViewModel : ViewModelBase
     /// </summary>
     private DocCheckItem BuildCheck(DocumentConfig doc, AppConfig config, string baseDir)
     {
-        var c = new DocCheckItem(doc, GenericExcelWriter.BuildOutputPath(
-                                          TargetDate, doc.OutputPattern, baseDir, config.OutputFolder));
+        var c = new DocCheckItem(doc, GenericExcelWriter.OutputPathFor(doc, TargetDate, baseDir, config.OutputFolder));
 
         // 서식 파일
         if (string.IsNullOrWhiteSpace(doc.TemplateFile) || !File.Exists(Path.Combine(baseDir, doc.TemplateFile)))
@@ -622,16 +631,19 @@ public class MainViewModel : ViewModelBase
         DateTime date = TargetDate;
         AppLog.Info($"파일 생성 시작: {date:yyyy-MM-dd}, 문서 {docs.Count}개 ({string.Join(", ", docs.Select(d => d.Name))})");
 
-        var (errors, notes) = await BackgroundWork.RunSta(() =>
+        var (errors, notes, problems) = await BackgroundWork.RunSta(() =>
         {
-            var errs  = new string?[docs.Count];
-            var notes = new List<string>();
+            var errs     = new string?[docs.Count];
+            var notes    = new List<string>();
+            var problems = new List<string>[docs.Count];   // 문서마다 저장 후 자동 검증 결과
             for (int i = 0; i < docs.Count; i++)
             {
+                problems[i] = [];
                 try
                 {
                     GenericExcelWriter.Generate(input, docs[i], baseDir, config.OutputFolder,
-                                                PhotoService.ResizeToCover, notes);
+                                                PhotoService.ResizeToCover, notes, problems[i]);
+                    foreach (var p in problems[i]) AppLog.Info($"자동 검증 [{docs[i].Name}]: {p}");
                 }
                 catch (Exception ex)
                 {
@@ -641,12 +653,12 @@ public class MainViewModel : ViewModelBase
             }
             var doneIds = docs.Where((_, i) => errs[i] == null).Select(d => d.Id).ToHashSet();
             InsertPhotos(photos, doneIds, date, config, baseDir, notes);
-            return (errs, notes);
+            return (errs, notes, problems);
         });
 
         for (int i = 0; i < targets.Count; i++)
         {
-            if (errors[i] == null) targets[i].SetDone();
+            if (errors[i] == null) targets[i].SetDone(problems[i]);
             else                   targets[i].SetFailed(errors[i]!);
         }
         AppLog.Info($"파일 생성 끝: 성공 {errors.Count(e => e == null)}개, 실패 {errors.Count(e => e != null)}개");
@@ -982,7 +994,7 @@ public class MainViewModel : ViewModelBase
             if (docConfig == null) continue;
             if (!generatedDocIds.Contains(slot.DocumentId)) continue;
 
-            string outputPath = GenericExcelWriter.BuildOutputPath(date, docConfig.OutputPattern, baseDir, config.OutputFolder);
+            string outputPath = GenericExcelWriter.OutputPathFor(docConfig, date, baseDir, config.OutputFolder);
             if (!File.Exists(outputPath)) continue;
 
             try
