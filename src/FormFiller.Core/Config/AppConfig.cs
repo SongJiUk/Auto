@@ -47,6 +47,12 @@ public class AppConfig
     /// 이름이 들어 있어 이 파일(config.json)은 GitHub 에 올리지 않는다. 명단 파일에서 처음 읽은 사람은 자동으로 추가된다.
     /// </summary>
     public List<PersonConfig> People { get; set; } = [];
+
+    /// <summary>
+    /// 폰 앱이 입력을 올리는 드라이브 폴더. 비어 있으면 exe 폴더 옆의 FormFiller_inbox
+    /// (예: G:\내 드라이브\FormFiller_inbox). exe 기준 상대 경로나 절대 경로를 쓸 수 있다.
+    /// </summary>
+    public string PhoneInboxFolder { get; set; } = "";
 }
 
 /// <summary>명단 블록의 사람 한 명</summary>

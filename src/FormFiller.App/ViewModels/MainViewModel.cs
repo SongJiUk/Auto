@@ -13,7 +13,7 @@ namespace FormFiller.App.ViewModels;
 /// <summary>
 /// MainWindow 의 DataContext.
 /// </summary>
-public class MainViewModel : ViewModelBase
+public partial class MainViewModel : ViewModelBase
 {
     // ── 기본 정보 ─────────────────────────────────────────────────────
     private DateTime _targetDate = DateTime.Today;
@@ -29,6 +29,7 @@ public class MainViewModel : ViewModelBase
                 LoadDocumentDueList();
                 LoadPreviousData();   // 날짜가 바뀌면 그 날짜 기준 이전 파일에서 전일 값을 다시 읽는다
                 ReloadBlockValues(keepEdits: true);
+                RefreshPhoneStatus(); // 그날 폰 입력이 있는지 (MainViewModel.Phone.cs)
             }
         }
     }
@@ -511,6 +512,7 @@ public class MainViewModel : ViewModelBase
         LoadPhotoSlots();
         LoadDocInputCards();
         LoadBlockInputs();
+        InitPhone();
         _trackDirty = true;
     }
 
