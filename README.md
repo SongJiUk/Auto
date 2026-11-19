@@ -41,6 +41,9 @@ G:\내 드라이브\FormFiller\
 코드 수정 → GitHub push → 새 exe를 `G:\내 드라이브\FormFiller\FormFiller.App.exe` 에 덮어쓰기.  
 (덮어쓰기 전에 프로그램을 닫는다. 다른 PC에는 드라이브가 자동으로 전달한다.)
 
+### 폰으로 작업할 때
+집 PC를 켜 두고 폰 Claude 앱에서 원격 조종 → [docs/폰으로_작업하기.md](docs/폰으로_작업하기.md)
+
 ---
 
 ## 새 PC에서 개발 환경 세팅하는 방법 (코드를 고칠 때만)
