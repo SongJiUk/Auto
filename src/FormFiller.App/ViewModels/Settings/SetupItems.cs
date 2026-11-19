@@ -59,6 +59,10 @@ public enum PickKind
     Column,     // 표의 열 하나 (그 열의 아무 칸 클릭)
     TotalCell,  // 숫자 누계: 누계 칸
     PrevCell,   // 숫자 누계: 전일 칸 (없으면 건너뛰기)
+    PhotoRange,    // 사진 구역: 사진 칸 자리 (드래그 또는 그림 클릭 후 확인)
+    PhotoCaption,  // 사진 구역: 방금 지정한 칸의 설명 칸 (없으면 건너뛰기)
+    SingleRange,   // 사진 구역: 1장일 때 자리 (없으면 건너뛰기)
+    SingleCaption, // 사진 구역: 1장일 때 설명 칸 (없으면 건너뛰기)
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -84,6 +88,7 @@ public record ItemTypeOption(string Icon, string Label, string Type, string? Fix
         new("📊", "표 — 줄마다 전일·금일·누계",          BlockTypes.Table,   Hint: "장비·인원 투입현황처럼 이름 줄마다 숫자. 열마다 역할을 클릭으로 정합니다."),
         new("👥", "명단 — 오늘 나온 사람",               BlockTypes.Roster,  Hint: "출력일보처럼 한 줄에 한 사람(직종·성명·작업내용). 사람 목록에서 체크합니다."),
         new("🧮", "계산 — 다른 항목 합계·이름 나열",     BlockTypes.Calc,    Hint: "TBM 인원 = 인원 표 합계 + 수장재, 투입 장비 이름 나열 등."),
+        new("📷", "사진 구역 — 그날 장수만큼 채우기",    BlockTypes.Photos,  Hint: "사진대지처럼 사진 칸 여러 개(+설명 칸). 사진이 1장인 날은 따로 정한 자리(두 칸 합친 자리 등)에 넣을 수 있습니다."),
         new("📷", "사진 (+ 옆 칸 측정값)",               FieldTypes.Photo),
         new("📍", "그림·글상자 위치 (장비·측정기 표시)", FieldTypes.ShapePosition),
         new("✏️", "시트마다 따로 입력하는 값",            FieldTypes.Input,   Hint: "같은 모양 시트 여러 개에 시트마다 다른 값을 넣을 때 (예: 측정 장소별 값)."),
@@ -159,6 +164,19 @@ public class SetupItemViewModel : ViewModelBase
     public int StartRow { get; private set; }
     public int EndRow   { get; private set; }
     public Dictionary<string, string> Cols { get; } = [];   // 역할 → 열 문자
+
+    // 사진 구역
+    public List<PhotoArea> PhotoAreas { get; private set; } = [];
+    public PhotoArea? SinglePhotoArea { get; private set; }
+
+    /// <summary>사진 구역 카드에 보여 줄 칸 목록 (한 줄에 한 칸)</summary>
+    public string PhotoAreasText =>
+        PhotoAreas.Count == 0 ? "아직 칸이 없습니다. [＋ 사진 칸 추가]를 누르세요."
+        : string.Join("\n", PhotoAreas.Select((a, i) => $"칸 {i + 1}: {AreaText(a)}"))
+          + "\n" + (SinglePhotoArea == null ? "1장일 때: 칸 1 에 넣음" : $"1장일 때: {AreaText(SinglePhotoArea)}");
+
+    private static string AreaText(PhotoArea a) =>
+        a.Range + (string.IsNullOrEmpty(a.CaptionCell) ? " (설명 없음)" : $" · 설명 {a.CaptionCell}");
 
     private string _newPresetName = "";
     public string NewPresetName { get => _newPresetName; set => SetField(ref _newPresetName, value); }
@@ -330,6 +348,7 @@ public class SetupItemViewModel : ViewModelBase
     public bool IsCounter => Type == BlockTypes.Counter && !IsHwpx;
     public bool IsTable   => Type == BlockTypes.Table;
     public bool IsCalc    => Type == BlockTypes.Calc;
+    public bool IsPhotos  => Type == BlockTypes.Photos && !IsHwpx;
     public bool IsLegacy  => BlockMigration.IsLegacy(Type);
 
     /// <summary>카드에 보여 줄 지정 내용 요약 (예: "사진 D12 · 값 E12 · 10:00")</summary>
@@ -344,6 +363,7 @@ public class SetupItemViewModel : ViewModelBase
         FieldTypes.EquipmentTable or FieldTypes.PersonnelTable or BlockTypes.Table or BlockTypes.Roster =>
             StartRow == 0 ? "" : $"{StartRow}~{EndRow}행 · " + string.Join(" ", ColKeys.Where(k => ColOf(k) != null).Select(k => $"{ColTitle(k)} {ColOf(k)}")),
         BlockTypes.Calc => SourcesText.Length == 0 ? Cell ?? "" : Join(Cell, $"= {CalcKind.Label.Split(' ')[0]}({SourcesText})"),
+        BlockTypes.Photos => PhotoAreas.Count == 0 ? "" : $"사진 칸 {PhotoAreas.Count}개" + (SinglePhotoArea == null ? "" : " · 1장일 때 자리 있음"),
         _ => Cell ?? (IsValue ? "칸 없음 (계산에만 사용)" : ""),
     };
 
@@ -358,6 +378,7 @@ public class SetupItemViewModel : ViewModelBase
         BlockTypes.Counter => Cell != null || TotalCell != null,
         BlockTypes.Value   => true,   // 칸이 없으면 계산에만 쓰는 입력
         BlockTypes.Calc    => Cell != null && SourcesText.Trim().Length > 0,
+        BlockTypes.Photos  => PhotoAreas.Count > 0,
         _ => Cell != null,
     };
 
@@ -402,6 +423,9 @@ public class SetupItemViewModel : ViewModelBase
     public ICommand RemoveCommand     { get; }
     public ICommand RevealCommand     { get; }
     public ICommand SavePresetCommand { get; }
+    public ICommand AddPhotoAreaCommand    { get; }
+    public ICommand PickSinglePhotoCommand { get; }
+    public ICommand ClearPhotoAreasCommand { get; }
 
     public SetupItemViewModel(ISetupHost host, string id, string label, string type)
     {
@@ -411,7 +435,12 @@ public class SetupItemViewModel : ViewModelBase
         Type   = type;
         Option = ItemTypeOption.For(type, id);
 
-        PickCommand       = new RelayCommand(_ => _host.StartPick(this, MainPickKind));
+        PickCommand       = new RelayCommand(_ =>
+        {
+            // 사진 구역: [Excel 에서 지정] 은 칸을 처음부터 다시 지정 (하나 더 넣기는 [＋ 사진 칸 추가])
+            if (Type == BlockTypes.Photos) { PhotoAreas = []; SinglePhotoArea = null; Changed(); }
+            _host.StartPick(this, MainPickKind);
+        });
         PickValueCommand  = new RelayCommand(_ => _host.StartPick(this, PickKind.ValueCell));
         PickColumnCommand = new RelayCommand(p => _host.StartPick(this, PickKind.Column, p as string));
         PickTotalCommand  = new RelayCommand(_ => _host.StartPick(this, PickKind.TotalCell));
@@ -420,6 +449,9 @@ public class SetupItemViewModel : ViewModelBase
         RevealCommand     = new RelayCommand(_ => _host.RevealItem(this));
         SavePresetCommand = new RelayCommand(_ => _host.SavePreset(this));
         LoadRoleMapCommand = new RelayCommand(_ => _host.LoadRoleMap(this));
+        AddPhotoAreaCommand    = new RelayCommand(_ => _host.StartPick(this, PickKind.PhotoRange));
+        PickSinglePhotoCommand = new RelayCommand(_ => _host.StartPick(this, PickKind.SingleRange), _ => PhotoAreas.Count > 0);
+        ClearPhotoAreasCommand = new RelayCommand(_ => { PhotoAreas = []; SinglePhotoArea = null; Changed(); }, _ => PhotoAreas.Count > 0);
     }
 
     /// <summary>이 항목을 처음 지정할 때 Excel 에서 무엇을 골라야 하는지</summary>
@@ -429,8 +461,26 @@ public class SetupItemViewModel : ViewModelBase
         FieldTypes.ShapePosition => PickKind.Shapes,
         FieldTypes.Multiline or BlockTypes.Lines => PickKind.Lines,
         FieldTypes.EquipmentTable or FieldTypes.PersonnelTable or BlockTypes.Table or BlockTypes.Roster => PickKind.Rows,
+        BlockTypes.Photos => PickKind.PhotoRange,
         _ => PickKind.Cell,
     };
+
+    // ── 사진 구역 지정 ───────────────────────────────────────────────
+    public void AddPhotoArea(string range) { PhotoAreas = [.. PhotoAreas, new PhotoArea { Range = range }]; Changed(); }
+    /// <summary>방금 추가한 칸의 설명 칸</summary>
+    public void SetLastCaption(string cell)
+    {
+        if (PhotoAreas.Count == 0) return;
+        PhotoAreas = [.. PhotoAreas.Take(PhotoAreas.Count - 1), new PhotoArea { Range = PhotoAreas[^1].Range, CaptionCell = cell }];
+        Changed();
+    }
+    public void SetSingleArea(string range) { SinglePhotoArea = new PhotoArea { Range = range }; Changed(); }
+    public void SetSingleCaption(string cell)
+    {
+        if (SinglePhotoArea == null) return;
+        SinglePhotoArea = new PhotoArea { Range = SinglePhotoArea.Range, CaptionCell = cell };
+        Changed();
+    }
 
     // ── 값 설정 (ViewModel 에서 호출) ────────────────────────────────
 
@@ -458,13 +508,14 @@ public class SetupItemViewModel : ViewModelBase
         OnPropertyChanged(nameof(ColumnButtons));
         OnPropertyChanged(nameof(HasSuffix));
         OnPropertyChanged(nameof(HasOwnSheet));
+        OnPropertyChanged(nameof(PhotoAreasText));
     }
 
     /// <summary>엑셀/한글 전환 시 표시 갱신</summary>
     public void RefreshMode()
     {
         foreach (var n in new[] { nameof(IsHwpx), nameof(IsExcel), nameof(IsShape), nameof(IsEquipTable),
-                                  nameof(IsPersonTable), nameof(IsCounter), nameof(Summary), nameof(IsComplete) })
+                                  nameof(IsPersonTable), nameof(IsCounter), nameof(IsPhotos), nameof(Summary), nameof(IsComplete) })
             OnPropertyChanged(n);
     }
 
@@ -519,6 +570,8 @@ public class SetupItemViewModel : ViewModelBase
         item.ShapeIndexes = f.ShapeIndexes ?? [];
         item.StartRow   = f.StartRow;
         item.EndRow     = f.EndRow;
+        item.PhotoAreas = (f.PhotoAreas ?? []).Select(a => new PhotoArea { Range = a.Range, CaptionCell = a.CaptionCell }).ToList();
+        item.SinglePhotoArea = f.SinglePhotoArea is { } s ? new PhotoArea { Range = s.Range, CaptionCell = s.CaptionCell } : null;
         void Col(string k, string? v) { if (!string.IsNullOrEmpty(v)) item.Cols[k] = v; }
         Col("name", f.NameCol); Col("prev", f.PrevDayCol); Col("today", f.TodayCol);
         item._specCol = f.SpecCol;   // 화면에서 고르지 않는 값 — 그대로 보존
@@ -600,6 +653,10 @@ public class SetupItemViewModel : ViewModelBase
                 break;
             case BlockTypes.Counter:
                 f.Cell = Cell; f.TotalCell = TotalCell; f.PrevCell = PrevCell;
+                break;
+            case BlockTypes.Photos:
+                f.PhotoAreas      = PhotoAreas.Select(a => new PhotoArea { Range = a.Range, CaptionCell = a.CaptionCell }).ToList();
+                f.SinglePhotoArea = SinglePhotoArea is { } s ? new PhotoArea { Range = s.Range, CaptionCell = s.CaptionCell } : null;
                 break;
             case BlockTypes.Value:
             case BlockTypes.Date:

@@ -258,6 +258,57 @@
             </Border>
         </DataTemplate>
 
+        <DataTemplate DataType="{x:Type vm:PhotosInputViewModel}">
+            <Border Style="{StaticResource BlockCard}">
+                <StackPanel>
+                    <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource BlockHeader}"/>
+                    <TextBlock Text="{Binding Note}" FontSize="11" Foreground="#718096" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                    <ItemsControl ItemsSource="{Binding Slots}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type vm:PhotoPickViewModel}">
+                                <StackPanel Width="190" Margin="0,0,10,8">
+                                    <DockPanel Margin="0,0,0,3">
+                                        <Button DockPanel.Dock="Right" Content="✕" Command="{Binding ClearCommand}"
+                                                Style="{StaticResource DelBtn}" ToolTip="사진 빼기"
+                                                Visibility="{Binding HasPhoto, Converter={StaticResource BoolVis}}"/>
+                                        <TextBlock Text="{Binding Label}" FontWeight="SemiBold" Foreground="#2D3748" VerticalAlignment="Center"/>
+                                    </DockPanel>
+                                    <!-- 누르면 파일 고르기, 사진을 끌어다 놓아도 된다 -->
+                                    <Border Height="130" CornerRadius="6" BorderThickness="1" BorderBrush="#CBD5E0" Background="#F7FAFC"
+                                            Cursor="Hand" AllowDrop="True" DragOver="PhotoSlot_DragOver" Drop="BlockPhoto_Drop"
+                                            ToolTip="눌러서 사진 고르기 / 사진 파일을 끌어다 놓기">
+                                        <Border.InputBindings>
+                                            <MouseBinding MouseAction="LeftClick" Command="{Binding BrowseCommand}"/>
+                                        </Border.InputBindings>
+                                        <Grid>
+                                            <TextBlock Text="📷&#x0a;눌러서 고르기&#x0a;또는 끌어다 놓기" TextAlignment="Center"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#A0AEC0" FontSize="11"/>
+                                            <!-- 사진이 있으면 안내 글자를 덮는다 -->
+                                            <Border Background="#F7FAFC" Margin="1" Visibility="{Binding HasPhoto, Converter={StaticResource BoolVis}}">
+                                                <Image Source="{Binding Thumbnail}" Stretch="UniformToFill"/>
+                                            </Border>
+                                        </Grid>
+                                    </Border>
+                                    <TextBlock Text="{Binding FileName}" FontSize="10" Foreground="#A0AEC0" TextTrimming="CharacterEllipsis"
+                                               Margin="0,2,0,0" ToolTip="{Binding Path}"/>
+                                    <DockPanel Margin="0,2,0,0" Visibility="{Binding HasCaption, Converter={StaticResource BoolVis}}">
+                                        <TextBlock Text="설명" Style="{StaticResource LabelStyle}" FontSize="11"/>
+                                        <TextBox Text="{Binding Caption, UpdateSourceTrigger=PropertyChanged}" FontSize="11" Padding="3,1"
+                                                 ToolTip="사진 아래 설명 칸에 들어갑니다 (예: 일일 TBM(수장재))"/>
+                                    </DockPanel>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <Button Content="📂 폴더에서 오늘 사진 불러오기" Command="{Binding ImportCommand}" Style="{StaticResource AddBtn}"
+                            HorizontalAlignment="Left"/>
+                </StackPanel>
+            </Border>
+        </DataTemplate>
+
         <DataTemplate DataType="{x:Type vm:CalcInputViewModel}">
             <Border Style="{StaticResource BlockCard}" Background="#F7FAFC">
                 <StackPanel>

@@ -178,7 +178,7 @@ public class DocInputCardViewModel : ViewModelBase
     /// 파일 시각이 그날보다 이전인 사진은 열지 않고 건너뛴다.
     /// (찍은 뒤에 저장·복사되므로 파일 시각은 촬영 시각보다 앞설 수 없다)
     /// </summary>
-    private static (List<(string Path, DateTime Taken)> Photos, int Heic) FindPhotosTakenOn(string folder, DateTime day)
+    internal static (List<(string Path, DateTime Taken)> Photos, int Heic) FindPhotosTakenOn(string folder, DateTime day)
     {
         var exts = new[] { ".jpg", ".jpeg", ".png" };
         var photos = new List<(string Path, DateTime Taken)>();

@@ -230,6 +230,21 @@
                             <Button Content="전일 칸 (선택)" Command="{Binding PickPrevCommand}" Style="{StaticResource SmallBtn}"/>
                         </WrapPanel>
 
+                        <!-- 사진 구역: 칸 목록 + 칸 추가 / 1장일 때 자리 / 다시 -->
+                        <StackPanel Margin="0,0,0,4" Visibility="{Binding IsPhotos, Converter={StaticResource BoolVis}}">
+                            <TextBlock Text="{Binding PhotoAreasText}" FontSize="11" Foreground="#4A5568" TextWrapping="Wrap"
+                                       LineHeight="17" Margin="0,0,0,4"/>
+                            <WrapPanel>
+                                <Button Content="＋ 사진 칸 추가" Command="{Binding AddPhotoAreaCommand}" Style="{StaticResource SmallBtn}"
+                                        ToolTip="사진이 들어갈 칸들을 드래그(또는 그 자리 그림 클릭) → 설명 칸 클릭"/>
+                                <Button Content="1장일 때 자리" Command="{Binding PickSinglePhotoCommand}" Style="{StaticResource SmallBtn}"
+                                        ToolTip="사진이 1장인 날 넣을 자리 (예: 두 칸을 합친 자리)와 그 설명 칸"/>
+                                <Button Content="칸 모두 지우기" Command="{Binding ClearPhotoAreasCommand}" Style="{StaticResource SmallBtn}"/>
+                            </WrapPanel>
+                            <TextBlock Text="사진은 메인 화면에서 매일 넣습니다 (그날 장수만큼 칸 1부터)." FontSize="10"
+                                       Foreground="#A0AEC0" Margin="0,3,0,0" TextWrapping="Wrap"/>
+                        </StackPanel>
+
                         <!-- 표: 명단에서 세기 -->
                         <StackPanel Visibility="{Binding IsTable, Converter={StaticResource BoolVis}}">
                             <DockPanel Margin="0,0,0,4">
@@ -454,7 +469,7 @@
                         <Button Content="확인" Command="{Binding ConfirmPickCommand}" Style="{StaticResource FlatBtn}"
                                 Background="White" Foreground="#2B6CB0" Margin="0,0,6,0"
                                 Visibility="{Binding PickNeedsConfirm, Converter={StaticResource BoolVis}}"/>
-                        <Button Content="건너뛰기" Command="{Binding SkipPickCommand}" Style="{StaticResource FlatBtn}"
+                        <Button Content="{Binding PickSkipText}" Command="{Binding SkipPickCommand}" Style="{StaticResource FlatBtn}"
                                 Background="#4299E1" Foreground="White" Margin="0,0,6,0"
                                 Visibility="{Binding PickCanSkip, Converter={StaticResource BoolVis}}"/>
                         <Button Content="취소" Command="{Binding CancelPickCommand}" Style="{StaticResource FlatBtn}"

@@ -179,6 +179,8 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
     private SetupItemViewModel? _pickItem;
     private PickKind _pickKind;
     private string?  _pickColumn;
+    /// <summary>사진 구역: 이번 단계에서 [확인]으로 자리를 지정했는지 (아니면 [건너뛰기])</summary>
+    private bool _photoRangeAdded;
 
     public bool IsPicking => _pickItem != null;
 
@@ -189,11 +191,23 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
     /// 칸·사진 클릭은 선택이 바뀌는 즉시 지정한다(자동).
     /// 여러 개 선택(그림 여러 개, 행 범위)은 다 고른 뒤 [확인]을 눌러야 한다.
     /// </summary>
-    public bool PickNeedsConfirm => _pickKind is PickKind.Shapes or PickKind.Rows or PickKind.Lines;
+    public bool PickNeedsConfirm => _pickKind is PickKind.Shapes or PickKind.Rows or PickKind.Lines
+                                             or PickKind.PhotoRange or PickKind.SingleRange;
 
     /// <summary>사진 옆 측정값 칸처럼 없을 수도 있는 단계는 [건너뛰기]</summary>
     public bool PickCanSkip => _pickKind is PickKind.ValueCell or PickKind.PrevCell
+                                         or PickKind.PhotoCaption or PickKind.SingleRange or PickKind.SingleCaption
+                            || (_pickKind == PickKind.PhotoRange && _pickItem?.PhotoAreas.Count > 0)
                             || (_pickKind == PickKind.Column && _pickItem != null && _pickItem.IsOptionalCol(_pickColumn ?? ""));
+
+    /// <summary>[건너뛰기] 버튼 글자 (사진 구역은 "칸 다 지정함" 처럼 뜻을 바로 보여 준다)</summary>
+    public string PickSkipText => _pickKind switch
+    {
+        PickKind.PhotoRange  => "칸 다 지정함",
+        PickKind.SingleRange => "1장일 때 자리 따로 없음",
+        PickKind.PhotoCaption or PickKind.SingleCaption => "설명 칸 없음",
+        _ => "건너뛰기",
+    };
 
     private string _pickPrompt = "";
     public string PickPrompt { get => _pickPrompt; private set => SetField(ref _pickPrompt, value); }
@@ -240,6 +254,7 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
         {
             if (_pickKind == PickKind.Column && _pickColumn != null) _skippedCols.Add(_pickColumn);
             if (_pickKind == PickKind.PrevCell) _pickItem?.SetPrevSkipped();
+            _photoRangeAdded = false;
             NextPickStep();
         });
         ConvertToBlocksCommand = new RelayCommand(_ => ConvertToBlocks(), _ => HasLegacyItems);
@@ -590,6 +605,7 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
         if (IsPicking || Bridge == null) return;
         Bridge.Reveal(item.Type == FieldTypes.Photo ? item.Cell
                       : item.Type is FieldTypes.Multiline or BlockTypes.Lines ? item.Cells.FirstOrDefault()
+                      : item.IsPhotos ? item.PhotoAreas.FirstOrDefault()?.Range.Split(':')[0]
                       : item.StartRow > 0 ? $"{item.ColKeys.Select(item.ColOf).FirstOrDefault(c => c != null) ?? "A"}{item.StartRow}"
                       : item.Cell ?? item.TotalCell,
                       item.Type == FieldTypes.ShapePosition ? item.ShapeIndexes : null);
@@ -624,6 +640,11 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
                                   + (item.IsOptionalCol(columnKey ?? "") ? " 없으면 [건너뛰기]." : ""),
             PickKind.TotalCell => $"「{item.Label}」 누계 칸을 클릭하세요 (누계 = 어제 누계 + 오늘).",
             PickKind.PrevCell  => $"「{item.Label}」 전일(어제까지 누계) 칸이 따로 있으면 클릭하세요. 없으면 [건너뛰기].",
+            PickKind.PhotoRange => $"「{item.Label}」 사진 칸 {item.PhotoAreas.Count + 1} 자리를 드래그(또는 그 자리 그림 클릭)한 뒤 [확인]."
+                                   + (item.PhotoAreas.Count > 0 ? " 칸이 더 없으면 [칸 다 지정함]." : ""),
+            PickKind.PhotoCaption => $"「{item.Label}」 사진 칸 {item.PhotoAreas.Count} 의 설명 칸을 클릭하세요. 없으면 [설명 칸 없음].",
+            PickKind.SingleRange  => $"「{item.Label}」 사진이 1장인 날 넣을 자리를 드래그(예: 두 칸을 합친 자리)한 뒤 [확인]. 따로 없으면 칸 1 에 넣습니다.",
+            PickKind.SingleCaption => $"「{item.Label}」 1장일 때 설명 칸을 클릭하세요. 없으면 [설명 칸 없음].",
             _ => "",
         };
 
@@ -645,6 +666,7 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
         OnPropertyChanged(nameof(PickingItem));
         OnPropertyChanged(nameof(PickNeedsConfirm));
         OnPropertyChanged(nameof(PickCanSkip));
+        OnPropertyChanged(nameof(PickSkipText));
     }
 
     /// <summary>
@@ -685,6 +707,16 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
                 NextPickStep();
                 break;
 
+            case PickKind.PhotoCaption when !sel.IsShapes:
+                item.SetLastCaption(sel.ActiveCell);
+                NextPickStep();
+                break;
+
+            case PickKind.SingleCaption when !sel.IsShapes:
+                item.SetSingleCaption(sel.ActiveCell);
+                NextPickStep();
+                break;
+
             case PickKind.Picture when sel.IsShapes && sel.ShapeNames.Count == 1:
                 item.Cell = sel.ActiveCell;
                 RecordSheet(item);
@@ -722,6 +754,17 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
                 RecordSheet(item);
                 break;
 
+            case PickKind.PhotoRange:
+            case PickKind.SingleRange:
+                // 칸을 드래그했거나, 그 자리에 있는 그림을 클릭했으면 그림이 덮는 칸 범위
+                if (sel.ColCount * sel.RowCount < 2) { Warn("사진이 들어갈 칸들을 드래그하거나, 그 자리의 그림을 클릭하세요."); return; }
+                string range = $"{HeaderDetector.ColLetter(sel.Col)}{sel.Row}:" +
+                               $"{HeaderDetector.ColLetter(sel.Col + sel.ColCount - 1)}{sel.Row + sel.RowCount - 1}";
+                if (_pickKind == PickKind.PhotoRange) item.AddPhotoArea(range); else item.SetSingleArea(range);
+                RecordSheet(item);
+                _photoRangeAdded = true;
+                break;
+
             default:
                 return;
         }
@@ -749,6 +792,22 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
         {
             string? nextCol = item.ColKeys.FirstOrDefault(k => item.ColOf(k) == null && !_skippedCols.Contains(k));
             if (nextCol != null) { StartPick(item, PickKind.Column, nextCol); return; }
+        }
+
+        // 사진 구역: 칸 자리 → 설명 칸 → 다음 칸 자리 … [칸 다 지정함] → (2칸 이상이면) 1장일 때 자리 → 그 설명 칸
+        if (item.IsPhotos)
+        {
+            switch (_pickKind)
+            {
+                case PickKind.PhotoRange when _photoRangeAdded:
+                    StartPick(item, PickKind.PhotoCaption); return;
+                case PickKind.PhotoCaption:
+                    StartPick(item, PickKind.PhotoRange); return;
+                case PickKind.PhotoRange when item.PhotoAreas.Count >= 2 && item.SinglePhotoArea == null:
+                    StartPick(item, PickKind.SingleRange); return;
+                case PickKind.SingleRange when item.SinglePhotoArea != null && _photoRangeAdded:
+                    StartPick(item, PickKind.SingleCaption); return;
+            }
         }
 
         // 숫자 누계: 오늘 칸 → 누계 칸 → 전일 칸(선택)

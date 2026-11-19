@@ -178,6 +178,17 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>사진 구역 카드의 사진 칸에 파일을 끌어다 놓았을 때</summary>
+    private void BlockPhoto_Drop(object sender, DragEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: PhotoPickViewModel slot }
+            && e.Data.GetData(DataFormats.FileDrop) is string[] { Length: > 0 } files)
+        {
+            slot.SetDropped(files[0]);
+            e.Handled = true;
+        }
+    }
+
     // ── 사진 슬롯 드래그&드롭 ────────────────────────────────────────
 
     /// <summary>이미지 파일을 슬롯 위로 드래그할 때 커서 변경</summary>

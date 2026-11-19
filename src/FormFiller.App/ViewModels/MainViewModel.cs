@@ -136,6 +136,45 @@ public partial class MainViewModel : ViewModelBase
                 if (win.ShowDialog() == true)
                     foreach (var text in win.SelectedItems) l.Add(text);
             };
+        if (vm is PhotosInputViewModel photos)
+            photos.ImportRequested += p => ImportBlockPhotos(p);
+    }
+
+    /// <summary>
+    /// 사진 구역: 그 블록을 쓰는 문서의 사진 폴더에서 고른 날짜에 찍은 사진을 찍은 순서대로 칸 1부터 넣는다.
+    /// 폴더가 없으면 고르게 하고, 그 블록을 쓰는 문서 모두에 저장한다.
+    /// </summary>
+    private async void ImportBlockPhotos(PhotosInputViewModel block)
+    {
+        try
+        {
+            var cfg  = AppConfigLoader.Load();
+            var docs = cfg.Documents.Where(d => block.DocIds.Contains(d.Id)).ToList();
+            string? folder = docs.Select(d => d.PhotoFolder).FirstOrDefault(f => !string.IsNullOrEmpty(f) && Directory.Exists(f));
+            if (folder == null)
+            {
+                var dlg = new Microsoft.Win32.OpenFolderDialog { Title = $"{block.Key} 사진을 올리는 폴더 (예: 구글 드라이브 폴더)" };
+                if (dlg.ShowDialog() != true) return;
+                folder = dlg.FolderName;
+                foreach (var d in docs) d.PhotoFolder = folder;
+                AppConfigLoader.Save(cfg);
+            }
+
+            DateTime day = TargetDate.Date;
+            string f = folder;
+            var (all, heic) = await BackgroundWork.RunSta(() => DocInputCardViewModel.FindPhotosTakenOn(f, day));
+            int placed = block.SetPhotos(all.Select(p => p.Path).ToList());
+
+            string msg = $"{day:yyyy-MM-dd} 에 찍은 사진 {all.Count}장 중 {placed}장을 넣었습니다 (칸 {block.Slots.Count}개).\n폴더: {folder}";
+            if (all.Count > block.Slots.Count) msg += "\n\n칸보다 사진이 많아서 먼저 찍은 사진부터 넣었습니다. 사진 칸을 눌러 바꿀 수 있습니다.";
+            if (heic > 0) msg += $"\n\n※ HEIC 사진 {heic}장은 읽을 수 없습니다. 폰 카메라 설정을 '호환성 우선(JPG)'으로 바꿔 주세요.";
+            MessageBox.Show(msg, "사진 불러오기", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error($"사진 구역 불러오기 실패: {block.Key}", ex);
+            MessageBox.Show($"사진을 불러오지 못했습니다.\n\n{ex.Message}", "사진 불러오기", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
     }
 
     /// <summary>지금 화면의 블록 값 (계산 카드는 값이 없어 뺀다)</summary>

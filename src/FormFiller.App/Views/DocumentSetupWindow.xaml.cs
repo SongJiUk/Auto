@@ -220,8 +220,14 @@ public partial class DocumentSetupWindow : Window, IExcelBridge
                 names.Add((string)sr.Item(i).Name);
                 order.Add((int)sr.Item(i).ZOrderPosition - 1);   // 시트 안 그림 순서 (파일의 그림 순서와 같다)
             }
-            dynamic tl = sr.Item(1).TopLeftCell;
-            return new ExcelSelection(true, (string)tl.Address(false, false), (int)tl.Row, (int)tl.Column, 1, names, order);
+            dynamic first = sr.Item(1);
+            dynamic tl = first.TopLeftCell, br = first.BottomRightCell;
+            // 그림이 덮는 칸 범위 (사진 구역 지정용). 그림 끝이 칸 경계에 딱 맞으면 BottomRightCell 이 다음 칸이라 한 칸 뺀다.
+            int lastRow = (int)br.Row, lastCol = (int)br.Column;
+            if ((double)first.Top + (double)first.Height - (double)br.Top < 2 && lastRow > (int)tl.Row) lastRow--;
+            if ((double)first.Left + (double)first.Width - (double)br.Left < 2 && lastCol > (int)tl.Column) lastCol--;
+            return new ExcelSelection(true, (string)tl.Address(false, false), (int)tl.Row, (int)tl.Column,
+                                      lastRow - (int)tl.Row + 1, names, order, lastCol - (int)tl.Column + 1);
         }
         catch { /* 칸 선택 */ }
 

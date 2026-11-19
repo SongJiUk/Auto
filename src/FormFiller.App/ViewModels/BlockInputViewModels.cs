@@ -64,6 +64,7 @@ public abstract class BlockInputViewModel : ViewModelBase
         BlockTypes.Table   => new TableInputViewModel(key, f),
         BlockTypes.Roster  => new RosterInputViewModel(key, f),
         BlockTypes.Calc    => new CalcInputViewModel(key, f),
+        BlockTypes.Photos  => new PhotosInputViewModel(key, f),
         _                  => null,   // 날짜·고정값·어제 값 그대로 → 입력할 것 없음
     };
 }
@@ -346,6 +347,138 @@ public class RosterInputViewModel : BlockInputViewModel
               .Select(p => new PersonConfig { Name = p.Name.Trim(), Role = p.Job.Trim(), Task = p.Task.Trim() });
 
     public override bool IsFilled => CheckedCount > 0;
+}
+
+// ── 사진 구역 ───────────────────────────────────────────────────────
+
+/// <summary>사진 구역 카드의 사진 칸 하나 (사진 + 설명)</summary>
+public class PhotoPickViewModel : ViewModelBase
+{
+    private readonly Action _onEdited;
+    public string Label { get; }
+    /// <summary>이 칸에 설명 칸이 있는지 (없으면 설명 입력 상자를 숨긴다)</summary>
+    public bool HasCaption { get; }
+
+    private string _path = "";
+    public string Path
+    {
+        get => _path;
+        set
+        {
+            if (!SetField(ref _path, value)) return;
+            OnPropertyChanged(nameof(HasPhoto));
+            OnPropertyChanged(nameof(FileName));
+            LoadThumbnail(value);
+            _onEdited();
+        }
+    }
+    public bool HasPhoto => _path.Length > 0;
+    public string FileName => HasPhoto ? System.IO.Path.GetFileName(_path) : "";
+
+    private string _caption = "";
+    public string Caption { get => _caption; set { if (SetField(ref _caption, value)) _onEdited(); } }
+
+    private System.Windows.Media.Imaging.BitmapImage? _thumbnail;
+    public System.Windows.Media.Imaging.BitmapImage? Thumbnail { get => _thumbnail; private set => SetField(ref _thumbnail, value); }
+
+    public ICommand BrowseCommand { get; }
+    public ICommand ClearCommand  { get; }
+
+    public PhotoPickViewModel(string label, bool hasCaption, Action onEdited)
+    {
+        Label = label; HasCaption = hasCaption; _onEdited = onEdited;
+        BrowseCommand = new RelayCommand(_ =>
+        {
+            var dlg = new Microsoft.Win32.OpenFileDialog
+                { Title = $"{Label} 선택", Filter = "이미지 파일 (*.jpg;*.jpeg;*.png;*.bmp)|*.jpg;*.jpeg;*.png;*.bmp" };
+            if (dlg.ShowDialog() == true) Path = dlg.FileName;
+        });
+        ClearCommand = new RelayCommand(_ => Path = "", _ => HasPhoto);
+    }
+
+    /// <summary>끌어다 놓은 파일 (사진만 받는다)</summary>
+    public void SetDropped(string file)
+    {
+        string ext = System.IO.Path.GetExtension(file).ToLowerInvariant();
+        if (ext is ".jpg" or ".jpeg" or ".png" or ".bmp") Path = file;
+    }
+
+    /// <summary>처음 값을 넣을 때 (사용자가 고친 것이 아니므로 Edited 를 올리지 않는다)</summary>
+    public void Init(string path, string caption)
+    {
+        _caption = caption; OnPropertyChanged(nameof(Caption));
+        if (_path == path) return;
+        _path = path;
+        OnPropertyChanged(nameof(Path)); OnPropertyChanged(nameof(HasPhoto)); OnPropertyChanged(nameof(FileName));
+        LoadThumbnail(path);
+    }
+
+    /// <summary>미리보기는 파일을 읽어야 해서(드라이브면 느림) 뒤에서 읽는다</summary>
+    private async void LoadThumbnail(string path)
+    {
+        Thumbnail = null;
+        if (path.Length == 0) return;
+        try
+        {
+            var thumb = await BackgroundWork.RunSta(() => PhotoService.LoadThumbnail(path));
+            if (_path == path) Thumbnail = thumb;
+        }
+        catch (Exception ex) { AppLog.Error($"사진 미리보기 실패: {path}", ex); }
+    }
+}
+
+/// <summary>
+/// 사진 구역: 설정한 사진 칸 수만큼 칸을 보여 준다. 그날 넣은 사진만 칸 1부터 차례로 들어가고,
+/// 1장이면 설정의 "1장일 때 자리"에 들어간다 (엔진 PhotoAreaWriter).
+/// </summary>
+public class PhotosInputViewModel : BlockInputViewModel
+{
+    public override string Icon => "📷";
+    public ObservableCollection<PhotoPickViewModel> Slots { get; } = [];
+    public ICommand ImportCommand { get; }
+
+    /// <summary>[📂 폴더에서 오늘 사진 불러오기] — 폴더는 문서 설정에 있어서 MainViewModel 이 처리한다</summary>
+    public event Action<PhotosInputViewModel>? ImportRequested;
+
+    public string Note => Field.SinglePhotoArea != null
+        ? $"사진 칸 {Slots.Count}개 · 1장만 넣으면 '1장일 때 자리'({Field.SinglePhotoArea.Range})에 크게 들어갑니다."
+        : $"사진 칸 {Slots.Count}개 · 넣은 사진만 칸 1부터 차례로 들어갑니다. 비우면 어제 사진 그대로.";
+
+    public PhotosInputViewModel(string key, FieldConfig f) : base(key, f)
+    {
+        var areas = f.PhotoAreas ?? [];
+        for (int i = 0; i < Math.Max(1, areas.Count); i++)
+        {
+            bool hasCaption = (i < areas.Count && !string.IsNullOrEmpty(areas[i].CaptionCell))
+                              || (i == 0 && !string.IsNullOrEmpty(f.SinglePhotoArea?.CaptionCell));
+            Slots.Add(new PhotoPickViewModel($"사진 {i + 1}", hasCaption, () => { IsEdited = true; RaiseEdited(); }));
+        }
+        ImportCommand = new RelayCommand(_ => ImportRequested?.Invoke(this));
+    }
+
+    /// <summary>사진은 매일 새로 넣고, 설명은 어제 설명을 처음 값으로 보여 준다.</summary>
+    public override void Load(BlockValue initial, bool keepEdits)
+    {
+        if (keepEdits && IsEdited) return;
+        for (int i = 0; i < Slots.Count; i++)
+            Slots[i].Init("", i < initial.Photos.Count ? initial.Photos[i].Caption : "");
+        IsEdited = false;
+    }
+
+    /// <summary>폴더에서 찾은 사진을 칸 1부터 넣는다 (넣은 장수를 돌려준다)</summary>
+    public int SetPhotos(IReadOnlyList<string> paths)
+    {
+        int n = Math.Min(paths.Count, Slots.Count);
+        for (int i = 0; i < Slots.Count; i++) Slots[i].Path = i < n ? paths[i] : "";
+        return n;
+    }
+
+    public override BlockValue ToValue() => new()
+    {
+        Photos = Slots.Select(s => new PhotoValue { Path = s.Path, Caption = s.Caption }).ToList(),
+    };
+
+    public override bool IsFilled => Slots.Any(s => s.HasPhoto);
 }
 
 // ── 계산 (입력 없음, 미리보기만) ────────────────────────────────────
