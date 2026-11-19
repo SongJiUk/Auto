@@ -109,7 +109,7 @@ public partial class DocumentSetupWindow : Window, IExcelBridge
             _xl.WindowState = -4143; // xlNormal
 
             var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
-            timer.Tick += (_, _) => { timer.Stop(); EmbedExcelWindow(); StartPolling(); };
+            timer.Tick += (_, _) => { timer.Stop(); EmbedExcelWindow(); StartPolling(); Vm.RefreshHighlights(); };
             timer.Start();
         }
         catch (Exception ex)
@@ -141,6 +141,7 @@ public partial class DocumentSetupWindow : Window, IExcelBridge
         Vm.CancelPick();
 
         // [순서] ① 떼기(소유자 해제) → ② 숨기기 → ③ 닫기(저장 안 함)
+        _painted.Clear();   // 통합문서를 닫으면(저장 안 함) 칠한 색도 같이 사라진다
         _excelHost?.Detach();
         ExcelHostControl.Content = null;
         _excelHost = null;
@@ -253,6 +254,57 @@ public partial class DocumentSetupWindow : Window, IExcelBridge
         if (!one) try { one = (string)sel.Address(false, false) == (string)_xl.ActiveCell.MergeArea.Address(false, false); } catch { }
         return new ExcelSelection(false, (string)_xl.ActiveCell.Address(false, false),
                                   (int)sel.Row, (int)sel.Column, rows, [], [], cols, one);
+    }
+
+    // ── 정한 칸 색 표시 ──────────────────────────────────────────────
+    // Excel 의 색 = BGR 숫자. 연한 초록 RGB(198,239,206)
+    private const int HighlightBgr = 206 * 65536 + 239 * 256 + 198;
+    private const int XlNone = -4142;
+
+    /// <summary>칠하기 전 원래 색 (시트, 범위, 색(null=섞임/없음), 무늬) — 칠한 순서대로</summary>
+    private readonly List<(string Sheet, string Range, object? Color, int Pattern)> _painted = [];
+
+    /// <summary>
+    /// 앞에 칠한 칸을 원래 색으로 돌리고(거꾸로), 지금 시트에 새로 칠한다.
+    /// 통합문서는 읽기 전용으로 열었고 닫을 때 저장하지 않으므로 서식 파일은 바뀌지 않는다.
+    /// </summary>
+    public void Highlight(IEnumerable<string> ranges)
+    {
+        if (_wb == null || _xl == null) return;
+        dynamic wb = _wb!, xl = _xl!;
+        bool screen = true;
+        try { screen = xl.ScreenUpdating; xl.ScreenUpdating = false; } catch { }
+        try
+        {
+            for (int i = _painted.Count - 1; i >= 0; i--)
+            {
+                var (sheet, range, color, pattern) = _painted[i];
+                try
+                {
+                    dynamic interior = wb.Sheets[sheet].Range(range).Interior;
+                    if (color == null || pattern == XlNone) interior.ColorIndex = XlNone;
+                    else { interior.Pattern = pattern; interior.Color = color; }
+                }
+                catch { /* 시트가 없어졌거나 잘못된 주소 */ }
+            }
+            _painted.Clear();
+
+            dynamic ws = xl.ActiveSheet;
+            string name = ws.Name;
+            foreach (string r in ranges)
+            {
+                try
+                {
+                    dynamic interior = ws.Range(r).Interior;
+                    object? color = interior.Color is double d ? d : null;   // 섞인 색이면 DBNull
+                    int pattern = interior.Pattern is int p ? p : XlNone;
+                    _painted.Add((name, r, color, pattern));
+                    interior.Color = HighlightBgr;
+                }
+                catch { /* 잘못된 주소는 건너뜀 */ }
+            }
+        }
+        finally { try { xl.ScreenUpdating = screen; } catch { } }
     }
 
     /// <summary>지금 시트 칸에 보이는 글자 (병합 칸은 왼쪽 위 칸에 글자가 있다)</summary>

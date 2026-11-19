@@ -29,6 +29,12 @@ public interface IExcelBridge
 
     /// <summary>지금 시트의 (행, 열) 칸에 보이는 글자 (머리글 자동 인식용). 1부터.</summary>
     string GetCellText(int row, int col);
+
+    /// <summary>
+    /// 지정한 칸들을 지금 시트에 색으로 표시한다 (미리보기에만, 파일은 저장하지 않음).
+    /// 부를 때마다 앞에 칠한 색을 원래대로 돌리고 새로 칠한다.
+    /// </summary>
+    void Highlight(IEnumerable<string> ranges);
 }
 
 /// <summary>Excel 선택 상태</summary>
@@ -211,7 +217,7 @@ public class SetupItemViewModel : ViewModelBase
     public bool IsFixedValue => _valueSource.Value == BlockTypes.SourceFixed;
 
     private string _fixedValue = "";
-    public string FixedValue { get => _fixedValue; set => SetField(ref _fixedValue, value); }
+    public string FixedValue { get => _fixedValue; set { if (SetField(ref _fixedValue, value)) Changed(); } }
 
     public IReadOnlyList<string> DateFormats => BlockTypes.DateFormats;
     private string _dateFormat = BlockTypes.DateFormats[0];
@@ -224,7 +230,7 @@ public class SetupItemViewModel : ViewModelBase
     public string DatePreview => "→ " + BlockTypes.FormatDate(_dateFormat, DateTime.Today);
 
     private string _prefix = "";
-    public string Prefix { get => _prefix; set => SetField(ref _prefix, value); }
+    public string Prefix { get => _prefix; set { if (SetField(ref _prefix, value)) Changed(); } }
 
     private string _startFrom = "";
     /// <summary>여러 줄의 처음 값: "" 빈 칸 / "same" 어제 이 항목 / 다른 항목 이름</summary>
@@ -302,7 +308,7 @@ public class SetupItemViewModel : ViewModelBase
         [new("0 그대로", ""), new("빈칸", BlockTypes.ZeroBlank), new("-", BlockTypes.ZeroDash)];
     public IReadOnlyList<Choice> ZeroChoices => ZeroChoiceList;
     private Choice _zeroAs = ZeroChoiceList[0];
-    public Choice ZeroAs { get => _zeroAs; set => SetField(ref _zeroAs, value); }
+    public Choice ZeroAs { get => _zeroAs; set { if (SetField(ref _zeroAs, value)) Changed(); } }
 
     /// <summary>숫자가 나오는 항목에만 "0 일 때" 고르기를 보여 준다</summary>
     public bool HasZeroOption => (IsValue && !IsFixedValue) || Type == BlockTypes.Counter || IsTable || IsFormula
@@ -413,6 +419,82 @@ public class SetupItemViewModel : ViewModelBase
         BlockTypes.Photos => PhotoAreas.Count == 0 ? "" : $"사진 칸 {PhotoAreas.Count}개" + (SinglePhotoArea == null ? "" : " · 1장일 때 자리 있음"),
         _ => Cell ?? (IsValue ? "칸 없음 (계산에만 사용)" : ""),
     };
+
+    // ── 미리보기: 오늘 만들면 이 칸에 무엇이 들어가는지 ──────────────
+
+    /// <summary>예: "오늘 만들면 → 2026년 11월 20일 금요일" / "지금 서식 값으로 계산하면 → 7"</summary>
+    public string Preview
+    {
+        get
+        {
+            string p = PreviewCore();
+            if (p.Length > 0 && HasZeroOption && BlockTypes.ZeroText(ZeroAs.Value) is { } z)
+                p += $"   ·   0이면 → {(z.Length == 0 ? "빈칸" : z)}";
+            return p;
+        }
+    }
+    public bool HasPreview => Preview.Length > 0;
+
+    private string PreviewCore()
+    {
+        if (IsHwpx) return "";
+        string Here(string? cell) => string.IsNullOrEmpty(cell) ? "" : _host.CellText(cell).Trim();
+        switch (Type)
+        {
+            case BlockTypes.Date:
+                return $"오늘 만들면 → {BlockTypes.FormatDate(_dateFormat, DateTime.Today)}";
+            case BlockTypes.Value when _valueSource.Value == BlockTypes.SourceFixed:
+                return $"매일 → {(_fixedValue.Length == 0 ? "(값을 적어 주세요)" : _fixedValue)}";
+            case BlockTypes.Value when _valueSource.Value == BlockTypes.SourceKeep:
+                return "이 칸은 손대지 않습니다 (어제 파일 값 그대로)";
+            case BlockTypes.Value:
+            {
+                string now = Here(Cell);
+                return "메인 화면에서 매일 입력 → 이 칸에" + (string.IsNullOrEmpty(Suffix) ? "" : $" (뒤에 '{Suffix}' 붙임)")
+                       + (now.Length > 0 ? $"   ·   처음에는 '{now}' 가 채워져 있음" : "");
+            }
+            case BlockTypes.Counter:
+                return TotalCell == null ? "오늘 숫자를 입력 → 이 칸에. 누계 칸도 정하세요"
+                     : $"오늘 3 입력 → {Cell ?? "?"} = 3,  {TotalCell} = 어제 누계 + 3";
+            case BlockTypes.Lines:
+                return Cells.Count == 0 ? "" : $"한 줄에 하나씩 → '{_prefix}철거 작업' 처럼 (칸 {Cells.Count}개)";
+            case BlockTypes.Table:
+                return StartRow == 0 ? "" : $"줄 이름마다 금일 숫자 입력 → 누계 = 전일 + 금일 ({EndRow - StartRow + 1}줄)";
+            case BlockTypes.Roster:
+                return StartRow == 0 ? "" : $"오늘 나온 사람을 체크 → 위에서부터 한 줄씩 ({EndRow - StartRow + 1}줄)";
+            case BlockTypes.Calc:
+                return SourcesText.Length == 0 ? "아래에서 계산에 쓸 항목을 체크하세요" : $"{CalcKind.Label.Split(' ')[0]} ← {SourcesText}";
+            case BlockTypes.Formula:
+            {
+                if (_formula.Trim().Length == 0 || BlockFormula.Check(_formula) != null) return "";
+                try
+                {
+                    var r = BlockFormula.Evaluate(_formula, x => x.Kind == BlockFormula.KindInput ? null : _host.CellText(x.Arg));
+                    return $"지금 서식 값으로 계산하면 → {BlockFormula.ToText(r)}   (입력값은 0 으로)";
+                }
+                catch { return ""; }
+            }
+            case BlockTypes.Photos:
+                return PhotoAreas.Count == 0 ? "" : $"그날 사진 {PhotoAreas.Count}장까지 → 칸 1부터 차례로";
+            default:
+                return "";
+        }
+    }
+
+    /// <summary>Excel 에 색으로 표시할 칸·범위 (이미 정한 칸이 한눈에 보이게)</summary>
+    public IEnumerable<string> HighlightRanges()
+    {
+        if (IsHwpx || Type is FieldTypes.Photo or FieldTypes.ShapePosition) yield break;
+        foreach (var c in new[] { Cell, TotalCell, PrevCell, ValueCell }) if (!string.IsNullOrEmpty(c)) yield return c;
+        foreach (var c in Cells) yield return c;
+        if (StartRow > 0)
+            foreach (var col in Cols.Values.Distinct()) yield return $"{col}{StartRow}:{col}{EndRow}";
+        foreach (var a in PhotoAreas)
+        {
+            yield return a.Range;
+            if (!string.IsNullOrEmpty(a.CaptionCell)) yield return a.CaptionCell;
+        }
+    }
 
     /// <summary>엑셀에서 지정이 끝났는지 (카드의 ✓ / "지정 필요")</summary>
     public bool IsComplete => IsHwpx ? !string.IsNullOrWhiteSpace(Placeholder) : Type switch
@@ -562,6 +644,8 @@ public class SetupItemViewModel : ViewModelBase
         OnPropertyChanged(nameof(HasOwnSheet));
         OnPropertyChanged(nameof(PhotoAreasText));
         OnPropertyChanged(nameof(HasZeroOption));
+        OnPropertyChanged(nameof(Preview));
+        OnPropertyChanged(nameof(HasPreview));
     }
 
     /// <summary>엑셀/한글 전환 시 표시 갱신</summary>
@@ -752,6 +836,8 @@ public class PresetItemViewModel
 public interface ISetupHost
 {
     bool IsHwpx { get; }
+    /// <summary>지금 서식(왼쪽 Excel)에서 그 칸에 보이는 글자 (미리보기용). 없으면 "".</summary>
+    string CellText(string address);
     /// <summary>이 문서와 다른 문서들에 있는 블록 값 이름 (처음 값·계산 고르기용)</summary>
     IReadOnlyList<string> KnownKeys();
     /// <summary>표의 줄 이름과 명단 직종을 서식에서 읽어 짝짓기 표를 채운다</summary>

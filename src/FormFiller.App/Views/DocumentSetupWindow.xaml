@@ -138,6 +138,12 @@
                         <Run Text="{Binding Summary, Mode=OneWay}" Foreground="#2B6CB0"/>
                     </TextBlock>
 
+                    <!-- 미리보기: 오늘 만들면 이 칸에 무엇이 들어가는지 -->
+                    <Border Margin="22,5,0,0" Padding="7,3" CornerRadius="4" Background="#F0FFF4"
+                            Visibility="{Binding HasPreview, Converter={StaticResource BoolVis}}">
+                        <TextBlock Text="{Binding Preview}" FontSize="11" Foreground="#276749" TextWrapping="Wrap"/>
+                    </Border>
+
                     <!-- Excel: 다시 지정 / 측정값 칸 / 표의 열 -->
                     <WrapPanel Margin="22,6,0,0" Visibility="{Binding IsExcel, Converter={StaticResource BoolVis}}">
                         <Button Content="📍 Excel 에서 지정" Command="{Binding PickCommand}" Style="{StaticResource SmallBtn}"/>
@@ -511,9 +517,11 @@
                         <Button DockPanel.Dock="Right" Content="✕" Command="{Binding CloseCellChoicesCommand}"
                                 Style="{StaticResource FlatBtn}" Background="Transparent" Foreground="#718096" Padding="6,0"
                                 ToolTip="닫기"/>
-                        <TextBlock FontWeight="SemiBold" Foreground="#2C5282" TextWrapping="Wrap">
-                            <Run Text="{Binding SelectionText, Mode=OneWay}"/><Run Text="  →  이 칸은?"/>
-                        </TextBlock>
+                        <StackPanel>
+                            <TextBlock Text="{Binding SelectionText}" FontSize="11" Foreground="#4A5568"/>
+                            <TextBlock Text="{Binding ChoiceQuestion}" FontWeight="SemiBold" FontSize="14" Foreground="#2C5282"
+                                       TextWrapping="Wrap" Margin="0,2,0,0"/>
+                        </StackPanel>
                     </DockPanel>
                     <TextBlock Text="{Binding SelectionOwner}" FontSize="11" Foreground="#C05621" TextWrapping="Wrap" Margin="0,3,0,0"
                                Visibility="{Binding HasSelectionOwner, Converter={StaticResource BoolVis}}"/>
@@ -529,8 +537,38 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
-                    <TextBlock Text="고르면 아래 목록에 항목이 생기고, 남은 칸(누계 칸·표의 열 등)을 이어서 묻습니다." FontSize="10"
+                    <TextBlock Text="마우스를 올리면 설명이 나옵니다. 고르면 항목이 생기고, 더 필요한 칸이 있으면 이어서 묻습니다." FontSize="10"
                                Foreground="#718096" TextWrapping="Wrap"/>
+                </StackPanel>
+            </Border>
+
+            <!-- 방금 만든 항목: 그 자리에서 바로 고치기 -->
+            <Border Background="#F0FFF4" BorderBrush="#9AE6B4" BorderThickness="0,0,0,1" Padding="12,8,12,6">
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="Visibility" Value="Collapsed"/>
+                        <Style.Triggers>
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding HasEditingItem}" Value="True"/>
+                                    <Condition Binding="{Binding IsPicking}" Value="False"/>
+                                    <Condition Binding="{Binding HasCellChoices}" Value="False"/>
+                                </MultiDataTrigger.Conditions>
+                                <Setter Property="Visibility" Value="Visible"/>
+                            </MultiDataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
+                <StackPanel>
+                    <DockPanel Margin="0,0,0,6">
+                        <Button DockPanel.Dock="Right" Content="완료" Command="{Binding CloseEditingCommand}"
+                                Style="{StaticResource FlatBtn}" Background="#38A169" Foreground="White" Padding="12,3"/>
+                        <TextBlock Text="✔ 항목을 만들었습니다. 여기서 바로 고치고 [완료], 또는 다음 칸을 클릭하세요."
+                                   Foreground="#276749" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                    </DockPanel>
+                    <ScrollViewer MaxHeight="330" VerticalScrollBarVisibility="Auto">
+                        <ContentControl Content="{Binding EditingItem}"/>
+                    </ScrollViewer>
                 </StackPanel>
             </Border>
 
@@ -701,8 +739,14 @@
             </ScrollViewer>
 
             <Border Grid.Row="2" Padding="14,10" BorderBrush="#E2E8F0" BorderThickness="0,1,0,0" Background="White">
-                <Button Content="💾  저장" Command="{Binding SaveCommand}" Style="{StaticResource PrimaryBtn}"
-                        Height="38" FontSize="14" FontWeight="SemiBold"/>
+                <DockPanel>
+                    <Button DockPanel.Dock="Left" Content="🧪 시험 생성" Command="{Binding TestGenerateCommand}"
+                            Style="{StaticResource FlatBtn}" Height="38" Margin="0,0,8,0" Padding="14,4"
+                            ToolTip="저장하지 않고 지금 설정으로 오늘 파일을 임시 폴더에 만들어 열어 봅니다"
+                            Visibility="{Binding IsExcel, Converter={StaticResource BoolVis}}"/>
+                    <Button Content="💾  저장" Command="{Binding SaveCommand}" Style="{StaticResource PrimaryBtn}"
+                            Height="38" FontSize="14" FontWeight="SemiBold"/>
+                </DockPanel>
             </Border>
         </Grid>
     </Grid>

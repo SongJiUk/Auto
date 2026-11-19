@@ -68,7 +68,7 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
     public string SelectedSheet
     {
         get => _selectedSheet;
-        set => SetField(ref _selectedSheet, value);
+        set { if (SetField(ref _selectedSheet, value)) RefreshHighlights(); }   // 시트를 바꾸면 그 시트의 칸을 칠한다
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -274,8 +274,13 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
             OnPropertyChanged(nameof(ShowSujangjae));
             if (e.NewItems != null)
                 foreach (SetupItemViewModel it in e.NewItems)
-                    it.PropertyChanged += (_, pe) => { if (pe.PropertyName is nameof(SetupItemViewModel.Key) or nameof(SetupItemViewModel.Label)) RefreshKnownKeys(); };
+                    it.PropertyChanged += (_, pe) =>
+                    {
+                        if (pe.PropertyName is nameof(SetupItemViewModel.Key) or nameof(SetupItemViewModel.Label)) RefreshKnownKeys();
+                        if (pe.PropertyName == nameof(SetupItemViewModel.Summary)) RefreshHighlights();
+                    };
             RefreshKnownKeys();
+            RefreshHighlights();
         };
     }
 
@@ -604,6 +609,7 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
     public void RemoveItem(SetupItemViewModel item)
     {
         if (_pickItem == item) CancelPick();
+        if (EditingItem == item) EditingItem = null;
         Items.Remove(item);
     }
 
@@ -860,6 +866,20 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
     /// <summary>예: "선택한 칸: H20" / "선택한 범위: A9:A17 (9줄)"</summary>
     public string SelectionText { get => _selectionText; private set => SetField(ref _selectionText, value); }
 
+    private string _choiceQuestion = "";
+    /// <summary>예: "이 칸에는 무엇이 들어가나요?"</summary>
+    public string ChoiceQuestion { get => _choiceQuestion; private set => SetField(ref _choiceQuestion, value); }
+
+    private SetupItemViewModel? _editingItem;
+    /// <summary>방금 만든 항목: 위쪽 상자에서 바로 이름·형식 등을 고친다 (아래 목록까지 내려가지 않게)</summary>
+    public SetupItemViewModel? EditingItem
+    {
+        get => _editingItem;
+        private set { if (SetField(ref _editingItem, value)) OnPropertyChanged(nameof(HasEditingItem)); }
+    }
+    public bool HasEditingItem => _editingItem != null;
+    public ICommand CloseEditingCommand => new RelayCommand(_ => EditingItem = null);
+
     private string _selectionOwner = "";
     /// <summary>이미 그 칸을 쓰는 항목이 있으면 안내 (예: "이 칸은 '날씨' 항목이 씁니다")</summary>
     public string SelectionOwner { get => _selectionOwner; private set { if (SetField(ref _selectionOwner, value)) OnPropertyChanged(nameof(HasSelectionOwner)); } }
@@ -875,38 +895,43 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
     {
         if (IsPicking || IsHwpx) return;
         _freeSel = sel;
+        EditingItem = null;
         CellChoices.Clear();
 
+        // 종류 이름 대신 "무엇이 들어가나요?" 에 대한 답으로 고른다 (초보자도 고를 수 있게)
         if (sel.IsShapes)
         {
-            SelectionText = $"선택한 그림: {string.Join(", ", sel.ShapeNames)}";
-            Add("📷", "사진 자리 (그날 장수만큼)", BlockTypes.Photos, "이 그림 자리에 매일 그날 사진을 넣습니다. 칸이 여러 개면 이어서 지정합니다.");
+            SelectionText  = $"선택한 그림: {string.Join(", ", sel.ShapeNames)}";
+            ChoiceQuestion = "이 그림은 매일 어떻게 하나요?";
+            Add("📷", "그날 찍은 사진으로 바꿔요", BlockTypes.Photos, "이 그림 자리에 매일 그날 사진을 넣습니다. 사진 칸이 여러 개면 이어서 지정합니다.");
             if (sel.ShapeNames.Count == 1)
-                Add("📷", "사진 + 옆 칸 측정값", FieldTypes.Photo, "이 그림을 매일 사진으로 바꾸고, 옆 칸에 측정값을 씁니다.");
-            Add("📍", "그림 위치 (매일 고르기)", FieldTypes.ShapePosition, "이 그림·글상자를 저장해 둔 위치 중 하나로 옮깁니다.");
+                Add("📷", "사진으로 바꾸고 옆 칸에 측정값도 써요", FieldTypes.Photo, "소음 측정처럼 사진 + 숫자 한 칸.");
+            Add("📍", "위치만 옮겨요 (장비·측정기 표시)", FieldTypes.ShapePosition, "이 그림·글상자를 저장해 둔 위치 중 하나로 옮깁니다.");
         }
         else if (sel.IsOneCell)
         {
-            SelectionText = $"선택한 칸: {sel.ActiveCell}";
-            Add("✏️", "매일 입력", BlockTypes.Value, "메인 화면에서 매일 입력합니다 (어제 값이 미리 채워짐).");
-            Add("📌", "항상 같은 값", BlockTypes.Value, "매일 같은 값을 씁니다.", i => i.ValueSource = SetupItemViewModel.ValueSourceList[2]);
-            Add("📅", "날짜", BlockTypes.Date, "만드는 날짜를 고른 형식으로 씁니다.");
-            Add("➕", "누계 (오늘 + 어제 누계)", BlockTypes.Counter, "이 칸은 오늘 숫자. 이어서 누계 칸을 클릭합니다.");
-            Add("🧾", "식 (직접 계산)", BlockTypes.Formula, "어제 칸·오늘 칸·입력값으로 계산합니다. 예) [어제 H20] + [입력 장비]");
-            Add("🧮", "다른 항목 합계·이름 나열", BlockTypes.Calc, "표의 금일 합계, 명단 인원 수, 투입 장비 이름 나열 등.");
+            SelectionText  = $"선택한 칸: {sel.ActiveCell}";
+            ChoiceQuestion = "이 칸에는 무엇이 들어가나요?";
+            Add("📅", "날짜", BlockTypes.Date, "만드는 날 날짜를 원하는 모양으로 씁니다 (2026.11.20 / 2026년 11월 20일 금요일 …).");
+            Add("✏️", "매일 다른 값 (날씨·인원·측정값 등)", BlockTypes.Value, "메인 화면에서 매일 입력합니다. 어제 값이 미리 채워져 있어 바뀐 것만 고치면 됩니다.");
+            Add("📌", "늘 같은 값 (현장명·참석율 등)", BlockTypes.Value, "매일 같은 값을 씁니다.", i => i.ValueSource = SetupItemViewModel.ValueSourceList[2]);
+            Add("➕", "어제까지 누계에 오늘을 더한 값", BlockTypes.Counter, "이 칸에는 오늘 숫자, 이어서 클릭할 칸에는 누계(어제 누계 + 오늘)를 씁니다.");
+            Add("🧮", "다른 항목들의 합계·이름 모음", BlockTypes.Calc, "인원 표의 금일 합계, 명단 인원 수, 투입 장비 이름 나열 등.");
+            Add("🧾", "계산식 직접 만들기 (고급)", BlockTypes.Formula, "어제 칸·오늘 칸·입력값을 더하고 빼거나 글자로 이어붙입니다. 예) [어제 H20] + [입력 장비]");
             if (SheetChoices.Count(c => c.IsChecked) > 1)
-                Add("✏️", "시트마다 따로 입력", FieldTypes.Input, "같은 모양 시트마다 다른 값을 입력합니다.");
+                Add("✏️", "시트마다 다른 값", FieldTypes.Input, "같은 모양 시트마다 따로 입력합니다 (측정 장소별 값 등).");
         }
         else
         {
-            SelectionText = $"선택한 범위: {RangeOf(sel)} ({sel.RowCount}줄 × {sel.ColCount}열)";
-            Add("📝", "여러 줄 글", BlockTypes.Lines, "한 줄씩 입력합니다 (작업사항 등). 첫 열에 씁니다.");
+            SelectionText  = $"선택한 범위: {RangeOf(sel)} ({sel.RowCount}줄 × {sel.ColCount}열)";
+            ChoiceQuestion = "이 범위에는 무엇이 들어가나요?";
+            Add("📝", "여러 줄 글 (작업내용 등)", BlockTypes.Lines, "한 줄에 하나씩 입력합니다. 어제 내용에서 시작하게 할 수도 있습니다.");
             if (sel.ColCount > 1)
             {
-                Add("📊", "표 (줄마다 전일·금일·누계)", BlockTypes.Table, "머리글을 읽어 열을 찾고, 못 찾은 열만 클릭합니다.");
-                Add("👥", "명단 (한 줄에 한 사람)", BlockTypes.Roster, "직종·성명·작업내용. 메인 화면에서 오늘 나온 사람을 체크합니다.");
+                Add("📊", "이름별 숫자 표 (장비·인원 투입현황)", BlockTypes.Table, "줄마다 이름과 전일·금일·누계. 머리글을 읽어 열을 찾고, 못 찾은 열만 클릭합니다.");
+                Add("👥", "사람 명단 (한 줄에 한 사람)", BlockTypes.Roster, "직종·성명·작업내용. 메인 화면에서 오늘 나온 사람만 체크합니다.");
             }
-            Add("📷", "사진 자리 (그날 장수만큼)", BlockTypes.Photos, "이 범위에 그날 사진을 꽉 채워 넣습니다. 칸이 여러 개면 이어서 지정합니다.");
+            Add("📷", "그날 찍은 사진", BlockTypes.Photos, "이 범위에 사진을 꽉 채워 넣습니다. 사진 칸이 여러 개면 이어서 지정합니다.");
         }
 
         string? owner = Items.FirstOrDefault(i => i.UsesCell(sel.ActiveCell))?.Label;
@@ -915,6 +940,33 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
 
         void Add(string icon, string label, string type, string hint, Action<SetupItemViewModel>? preset = null) =>
             CellChoices.Add(new CellChoice(icon, label, hint, new RelayCommand(_ => CreateFromSelection(type, label, preset))));
+    }
+
+    /// <summary>미리보기용: 지금 서식에서 그 칸(예: "H20")에 보이는 글자</summary>
+    public string CellText(string address)
+    {
+        if (Bridge == null || string.IsNullOrWhiteSpace(address)) return "";
+        try
+        {
+            var (col, row) = CellHelper.ParseAddress(address.Trim().ToUpperInvariant());
+            return Bridge.GetCellText((int)row, (int)CellHelper.ColLetterToIndex(col));
+        }
+        catch { return ""; }
+    }
+
+    /// <summary>
+    /// 이미 정한 칸을 Excel 에 색으로 칠한다. 지금 보이는 시트에 쓰는 항목만
+    /// (시트를 따로 정한 항목은 그 시트일 때, 아니면 "적용할 시트" 일 때).
+    /// </summary>
+    public void RefreshHighlights()
+    {
+        if (Bridge == null || IsHwpx) return;
+        string sheet = SelectedSheet ?? "";
+        bool isTarget = SheetChoices.Any(c => c.IsChecked && c.Name == sheet);
+        var ranges = Items.Where(i => i.HasOwnSheet ? i.Sheet == sheet : isTarget)
+                          .SelectMany(i => i.HighlightRanges()).Distinct().ToList();
+        try { Bridge.Highlight(ranges); }
+        catch (Exception ex) { AppLog.Error("칸 색 표시 실패", ex); }
     }
 
     public void ClearCellChoices()
@@ -940,6 +992,7 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
         preset?.Invoke(item);
         Items.Add(item);
         ItemCreated?.Invoke(this, item);
+        EditingItem = item;   // 위쪽 상자에서 바로 고치게
 
         // 고른 선택을 그대로 첫 단계로 쓴다 (다시 클릭하지 않게)
         StartPick(item, item.MainPickKind);
@@ -1035,27 +1088,7 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
             var config = AppConfigLoader.Load();
 
             string id = _editing?.Id ?? MakeDocId(DocumentName, config);
-            var doc = new DocumentConfig
-            {
-                Id                = id,
-                Name              = DocumentName.Trim(),
-                TemplateFile      = AppConfigLoader.ToStoredTemplatePath(_filePath),
-                OutputPattern     = OutputPattern.Trim(),
-                SheetName         = sheets.FirstOrDefault() ?? "",
-                SheetNames        = sheets.Count > 1 ? sheets : [],
-                Frequency         = SelectedFrequency.Value,
-                FrequencyDays     = IsCustomFrequency ? FrequencyDays : 0,
-                WeeklyDay         = SelectedWeekday.Value,
-                UseWeeklyDayDate  = IsWeeklyFrequency && UseWeeklyDayDate,
-                IncludesSujangjae = IncludesSujangjae,
-                PhotoSheet        = PhotoSheet,
-                PhotoSlots        = PhotoSlotRows.Select(r => r.ToConfig()).ToList(),
-                Fields            = Items.Select(i => i.ToConfig()).ToList(),
-                // 이 화면에서 다루지 않는 값은 기존 설정을 그대로 유지
-                SaveMode          = _editing?.SaveMode ?? "create",
-                PhotoFolder       = _editing?.PhotoFolder ?? "",
-                UsePreviousAsBase = _editing?.UsePreviousAsBase ?? true,
-            };
+            var doc = BuildDocument(id, AppConfigLoader.ToStoredTemplatePath(_filePath));
 
             int idx = config.Documents.FindIndex(d => d.Id == id);
             if (idx >= 0) config.Documents[idx] = doc;
@@ -1068,6 +1101,76 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
         {
             MessageBox.Show($"저장 중 오류가 발생했습니다.\n{ex.Message}", "저장 오류",
                             MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    /// <summary>지금 화면의 설정으로 문서 설정을 만든다 (저장·시험 생성이 같이 쓴다)</summary>
+    private DocumentConfig BuildDocument(string id, string templateFile)
+    {
+        var sheets = SheetChoices.Where(s => s.IsChecked).Select(s => s.Name).ToList();
+        return new DocumentConfig
+        {
+            Id                = id,
+            Name              = DocumentName.Trim(),
+            TemplateFile      = templateFile,
+            OutputPattern     = OutputPattern.Trim(),
+            SheetName         = sheets.FirstOrDefault() ?? "",
+            SheetNames        = sheets.Count > 1 ? sheets : [],
+            Frequency         = SelectedFrequency.Value,
+            FrequencyDays     = IsCustomFrequency ? FrequencyDays : 0,
+            WeeklyDay         = SelectedWeekday.Value,
+            UseWeeklyDayDate  = IsWeeklyFrequency && UseWeeklyDayDate,
+            IncludesSujangjae = IncludesSujangjae,
+            PhotoSheet        = PhotoSheet,
+            PhotoSlots        = PhotoSlotRows.Select(r => r.ToConfig()).ToList(),
+            Fields            = Items.Select(i => i.ToConfig()).ToList(),
+            // 이 화면에서 다루지 않는 값은 기존 설정을 그대로 유지
+            SaveMode          = _editing?.SaveMode ?? "create",
+            PhotoFolder       = _editing?.PhotoFolder ?? "",
+            UsePreviousAsBase = _editing?.UsePreviousAsBase ?? true,
+        };
+    }
+
+    // ── 시험 생성 ────────────────────────────────────────────────────
+
+    public ICommand TestGenerateCommand => new RelayCommand(_ => TestGenerate());
+
+    /// <summary>
+    /// [🧪 시험 생성]: 저장하지 않고 지금 설정으로 오늘 파일을 임시 폴더에 만들어 본다.
+    /// 입력값은 서식에서 읽은 처음 값(매일 입력 칸은 서식 글자, 누계는 0 더하기)이라 칸 위치·형식 확인용.
+    /// 실제 출력 폴더·원본 서식은 건드리지 않는다.
+    /// </summary>
+    private void TestGenerate()
+    {
+        if (!HasFile || IsHwpx) { Warn("엑셀 서식이 열려 있어야 시험 생성을 할 수 있습니다."); return; }
+        if (string.IsNullOrWhiteSpace(OutputPattern)) OutputPattern = "{yy}.{MM}.{dd} 시험.xlsx";
+        try
+        {
+            var doc = BuildDocument("test", _filePath);
+            if (!doc.OutputPattern.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase))
+                doc.OutputPattern = Path.ChangeExtension(doc.OutputPattern, ".xlsx");
+            doc.UsePreviousAsBase = false;   // 늘 서식에서 새로
+
+            string folder = Path.Combine(Path.GetTempPath(), "FormFiller_시험", DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+            var input = new FormFiller.Core.Models.DailyInput
+            {
+                Date   = DateTime.Today,
+                Blocks = BlockEngine.InitialValues(doc, BlockEngine.ReadValues(_filePath, doc)),
+            };
+            var notes = new List<string>();
+            string path = GenericExcelWriter.Generate(input, doc, "", folder, notes: notes);
+
+            string msg = $"시험 파일을 만들었습니다 (저장하지 않음, 임시 폴더).\n{path}\n\n" +
+                         "입력 칸은 서식에 적힌 글자를 그대로 넣었습니다. 칸 위치·날짜 형식·식 결과를 확인하세요.";
+            if (notes.Count > 0) msg += "\n\n참고:\n· " + string.Join("\n· ", notes.Take(8));
+            if (MessageBox.Show(msg + "\n\n지금 Excel 로 열까요?", "시험 생성", MessageBoxButton.YesNo,
+                                MessageBoxImage.Information) == MessageBoxResult.Yes)
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("시험 생성 실패", ex);
+            MessageBox.Show($"시험 생성 중 오류가 났습니다.\n{ex.Message}", "시험 생성", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 
