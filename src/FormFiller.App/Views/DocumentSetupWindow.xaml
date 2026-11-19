@@ -230,6 +230,35 @@
                             <Button Content="전일 칸 (선택)" Command="{Binding PickPrevCommand}" Style="{StaticResource SmallBtn}"/>
                         </WrapPanel>
 
+                        <!-- 식: 식 상자 + 칸·입력 넣기 -->
+                        <StackPanel Margin="0,0,0,4" Visibility="{Binding IsFormula, Converter={StaticResource BoolVis}}">
+                            <DockPanel Margin="0,0,0,4">
+                                <TextBlock Text="식" Style="{StaticResource LabelStyle}" FontSize="11" Width="62"/>
+                                <TextBox Text="{Binding Formula, UpdateSourceTrigger=PropertyChanged}" FontSize="12" Padding="3,2"
+                                         FontFamily="Consolas, Malgun Gothic"
+                                         ToolTip="예) [어제 H20] + [입력 장비]   /   &quot;장비 &quot; &amp; [입력 장비] &amp; &quot;대&quot;"/>
+                            </DockPanel>
+                            <TextBlock Text="{Binding FormulaError}" FontSize="11" Foreground="#E53E3E" TextWrapping="Wrap" Margin="62,0,0,4"
+                                       Visibility="{Binding HasFormulaError, Converter={StaticResource BoolVis}}"/>
+                            <WrapPanel Margin="62,0,0,0">
+                                <Button Content="＋ 어제 칸" Command="{Binding InsertYesterdayCellCommand}" Style="{StaticResource SmallBtn}"
+                                        ToolTip="Excel 에서 칸을 클릭하면 [어제 그 칸] 을 넣습니다"/>
+                                <Button Content="＋ 오늘 칸" Command="{Binding InsertTodayCellCommand}" Style="{StaticResource SmallBtn}"
+                                        ToolTip="Excel 에서 칸을 클릭하면 [그 칸] 을 넣습니다 (오늘 다른 항목을 다 쓴 뒤의 값)"/>
+                                <ComboBox ItemsSource="{Binding OtherKeys}" SelectedItem="{Binding InsertInputKey}" FontSize="11"
+                                          Width="120" Margin="0,0,4,4" ToolTip="고르면 [입력 이름] 을 식에 넣습니다"/>
+                            </WrapPanel>
+                            <TextBlock FontSize="10" Foreground="#A0AEC0" TextWrapping="Wrap" Margin="62,2,0,0"
+                                       Text="곱하기 *, 나누기 /, 글자는 &quot;…&quot;, 이어붙이기는 &amp;. 빈 칸은 0. ▾ 에서 입력 이름을 고르면 식에 들어갑니다."/>
+                        </StackPanel>
+
+                        <!-- 0 일 때 표시 -->
+                        <DockPanel Margin="0,0,0,4" Visibility="{Binding HasZeroOption, Converter={StaticResource BoolVis}}">
+                            <TextBlock Text="0 일 때" Style="{StaticResource LabelStyle}" FontSize="11" Width="62"/>
+                            <ComboBox ItemsSource="{Binding ZeroChoices}" SelectedItem="{Binding ZeroAs}" FontSize="11" Width="100"
+                                      HorizontalAlignment="Left" ToolTip="숫자가 0 이면 이렇게 씁니다"/>
+                        </DockPanel>
+
                         <!-- 사진 구역: 칸 목록 + 칸 추가 / 1장일 때 자리 / 다시 -->
                         <StackPanel Margin="0,0,0,4" Visibility="{Binding IsPhotos, Converter={StaticResource BoolVis}}">
                             <TextBlock Text="{Binding PhotoAreasText}" FontSize="11" Foreground="#4A5568" TextWrapping="Wrap"
@@ -460,8 +489,53 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
+            <StackPanel Grid.Row="0">
+            <!-- 칸 먼저 고르기: Excel 에서 칸을 고르면 "이 칸은?" -->
+            <Border Background="#EBF8FF" BorderBrush="#90CDF4" BorderThickness="0,0,0,1" Padding="12,10">
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="Visibility" Value="Collapsed"/>
+                        <Style.Triggers>
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding HasCellChoices}" Value="True"/>
+                                    <Condition Binding="{Binding IsPicking}" Value="False"/>
+                                </MultiDataTrigger.Conditions>
+                                <Setter Property="Visibility" Value="Visible"/>
+                            </MultiDataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
+                <StackPanel>
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Content="✕" Command="{Binding CloseCellChoicesCommand}"
+                                Style="{StaticResource FlatBtn}" Background="Transparent" Foreground="#718096" Padding="6,0"
+                                ToolTip="닫기"/>
+                        <TextBlock FontWeight="SemiBold" Foreground="#2C5282" TextWrapping="Wrap">
+                            <Run Text="{Binding SelectionText, Mode=OneWay}"/><Run Text="  →  이 칸은?"/>
+                        </TextBlock>
+                    </DockPanel>
+                    <TextBlock Text="{Binding SelectionOwner}" FontSize="11" Foreground="#C05621" TextWrapping="Wrap" Margin="0,3,0,0"
+                               Visibility="{Binding HasSelectionOwner, Converter={StaticResource BoolVis}}"/>
+                    <ItemsControl ItemsSource="{Binding CellChoices}" Margin="0,8,0,0">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type vm:CellChoice}">
+                                <Button Content="{Binding Display}" Command="{Binding Command}" ToolTip="{Binding Hint}"
+                                        Style="{StaticResource FlatBtn}" Background="White" Foreground="#2D3748"
+                                        Padding="9,5" Margin="0,0,6,6"/>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock Text="고르면 아래 목록에 항목이 생기고, 남은 칸(누계 칸·표의 열 등)을 이어서 묻습니다." FontSize="10"
+                               Foreground="#718096" TextWrapping="Wrap"/>
+                </StackPanel>
+            </Border>
+
             <!-- 고르는 중 안내 (Excel 에서 클릭하세요) -->
-            <Border Grid.Row="0" Background="#2B6CB0" Padding="12,10"
+            <Border Background="#2B6CB0" Padding="12,10"
                     Visibility="{Binding IsPicking, Converter={StaticResource BoolVis}}">
                 <StackPanel>
                     <TextBlock Text="{Binding PickPrompt}" Foreground="White" TextWrapping="Wrap" FontWeight="SemiBold"/>
@@ -477,6 +551,8 @@
                     </StackPanel>
                 </StackPanel>
             </Border>
+
+            </StackPanel>
 
             <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="14,0,14,10">
                 <StackPanel>
@@ -516,7 +592,8 @@
                         </StackPanel>
 
                         <CheckBox Grid.Row="3" Grid.Column="1" Content="인원에 수장재팀 포함"
-                                  IsChecked="{Binding IncludesSujangjae}" Foreground="#4A5568"/>
+                                  IsChecked="{Binding IncludesSujangjae}" Foreground="#4A5568"
+                                  Visibility="{Binding ShowSujangjae, Converter={StaticResource BoolVis}}"/>
                     </Grid>
 
                     <!-- 적용할 시트 -->
@@ -552,9 +629,10 @@
                     </Border>
                     <TextBlock FontSize="12" Foreground="#A0AEC0" TextWrapping="Wrap" Margin="0,0,0,8"
                                Visibility="{Binding HasNoItems, Converter={StaticResource BoolVis}}">
-                        [+ 항목 추가]를 누르고 종류를 고른 뒤, 왼쪽 Excel 에서 그 칸을 클릭하세요.
+                        왼쪽 Excel 에서 채울 칸을 클릭하세요 (여러 칸은 드래그, 사진은 그림 클릭).
+                        위쪽에 "이 칸은?" 선택지가 뜹니다. 칸 없이 계산에만 쓰는 입력은 [+ 항목 추가].
                     </TextBlock>
-                    <ItemsControl ItemsSource="{Binding Items}"/>
+                    <ItemsControl x:Name="ItemsList" ItemsSource="{Binding Items}"/>
 
                     <!-- 항목 추가 패널 -->
                     <Border Background="White" BorderBrush="#90CDF4" BorderThickness="1" CornerRadius="6"
@@ -594,7 +672,7 @@
 
                     <!-- 사진대지 슬롯 (예전 방식) -->
                     <Expander Header="사진대지 슬롯 (시트의 그림을 순서대로 교체하는 방식)" Margin="0,18,0,0"
-                              Foreground="#718096" Visibility="{Binding IsExcel, Converter={StaticResource BoolVis}}">
+                              Foreground="#718096" Visibility="{Binding ShowLegacyPhotoSlots, Converter={StaticResource BoolVis}}">
                         <StackPanel Margin="0,8,0,0">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="사진 시트" Style="{StaticResource LabelStyle}"/>

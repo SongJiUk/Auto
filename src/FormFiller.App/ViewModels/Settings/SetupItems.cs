@@ -41,10 +41,10 @@ public interface IExcelBridge
 /// <param name="ShapeIndexes">선택된 그림·글상자의 시트 안 순서 (0부터)</param>
 /// <param name="ColCount">선택 범위 열 수 (표 머리글 자동 인식에 쓴다)</param>
 public record ExcelSelection(bool IsShapes, string ActiveCell, int Row, int Col, int RowCount,
-                             List<string> ShapeNames, List<int> ShapeIndexes, int ColCount = 1)
+                             List<string> ShapeNames, List<int> ShapeIndexes, int ColCount = 1, bool IsOneCell = false)
 {
     /// <summary>선택이 바뀌었는지 비교하는 용도</summary>
-    public string Signature => IsShapes ? "S:" + string.Join(",", ShapeNames) : $"R:{ActiveCell}:{Row}:{Col}:{RowCount}";
+    public string Signature => IsShapes ? "S:" + string.Join(",", ShapeNames) : $"R:{ActiveCell}:{Row}:{Col}:{RowCount}:{ColCount}";
 }
 
 /// <summary>Excel 에서 무엇을 고르는 중인지</summary>
@@ -63,6 +63,8 @@ public enum PickKind
     PhotoCaption,  // 사진 구역: 방금 지정한 칸의 설명 칸 (없으면 건너뛰기)
     SingleRange,   // 사진 구역: 1장일 때 자리 (없으면 건너뛰기)
     SingleCaption, // 사진 구역: 1장일 때 설명 칸 (없으면 건너뛰기)
+    FormulaYesterday, // 식: [어제 칸] 으로 넣을 칸
+    FormulaCell,      // 식: [오늘 칸] 으로 넣을 칸
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -88,6 +90,7 @@ public record ItemTypeOption(string Icon, string Label, string Type, string? Fix
         new("📊", "표 — 줄마다 전일·금일·누계",          BlockTypes.Table,   Hint: "장비·인원 투입현황처럼 이름 줄마다 숫자. 열마다 역할을 클릭으로 정합니다."),
         new("👥", "명단 — 오늘 나온 사람",               BlockTypes.Roster,  Hint: "출력일보처럼 한 줄에 한 사람(직종·성명·작업내용). 사람 목록에서 체크합니다."),
         new("🧮", "계산 — 다른 항목 합계·이름 나열",     BlockTypes.Calc,    Hint: "TBM 인원 = 인원 표 합계 + 수장재, 투입 장비 이름 나열 등."),
+        new("🧾", "식 — 칸·입력으로 직접 계산",          BlockTypes.Formula, Hint: "예) [어제 H20] + [입력 장비]. 어제 파일 칸, 오늘 파일 칸, 오늘 입력값을 + − × ÷ 로 계산하거나 글자로 이어붙입니다."),
         new("📷", "사진 구역 — 그날 장수만큼 채우기",    BlockTypes.Photos,  Hint: "사진대지처럼 사진 칸 여러 개(+설명 칸). 사진이 1장인 날은 따로 정한 자리(두 칸 합친 자리 등)에 넣을 수 있습니다."),
         new("📷", "사진 (+ 옆 칸 측정값)",               FieldTypes.Photo),
         new("📍", "그림·글상자 위치 (장비·측정기 표시)", FieldTypes.ShapePosition),
@@ -268,6 +271,43 @@ public class SetupItemViewModel : ViewModelBase
         Changed();
     }
 
+    // ── 식 ───────────────────────────────────────────────────────────
+    private string _formula = "";
+    public string Formula
+    {
+        get => _formula;
+        set { if (SetField(ref _formula, value)) { OnPropertyChanged(nameof(FormulaError)); OnPropertyChanged(nameof(HasFormulaError)); Changed(); } }
+    }
+    /// <summary>식이 틀렸으면 이유 (카드에 빨간 글씨)</summary>
+    public string FormulaError => IsFormula ? BlockFormula.Check(_formula) ?? "" : "";
+    public bool HasFormulaError => FormulaError.Length > 0;
+
+    /// <summary>식 끝에 붙인다 (칸 클릭·입력 고르기)</summary>
+    public void AppendToFormula(string part)
+    {
+        string f = _formula.TrimEnd();
+        bool needsOp = f.Length > 0 && (f.EndsWith(']') || f.EndsWith('"') || f.EndsWith(')') || char.IsDigit(f[^1]));
+        Formula = (f.Length == 0 ? "" : f + (needsOp ? " + " : " ")) + part;
+    }
+
+    /// <summary>입력 이름을 고르면 식에 [입력 이름] 을 넣고 다시 비운다</summary>
+    public string? InsertInputKey
+    {
+        get => null;
+        set { if (!string.IsNullOrWhiteSpace(value)) AppendToFormula($"[입력 {value.Trim()}]"); OnPropertyChanged(); }
+    }
+
+    // ── 0 일 때 표시 ─────────────────────────────────────────────────
+    public static IReadOnlyList<Choice> ZeroChoiceList { get; } =
+        [new("0 그대로", ""), new("빈칸", BlockTypes.ZeroBlank), new("-", BlockTypes.ZeroDash)];
+    public IReadOnlyList<Choice> ZeroChoices => ZeroChoiceList;
+    private Choice _zeroAs = ZeroChoiceList[0];
+    public Choice ZeroAs { get => _zeroAs; set => SetField(ref _zeroAs, value); }
+
+    /// <summary>숫자가 나오는 항목에만 "0 일 때" 고르기를 보여 준다</summary>
+    public bool HasZeroOption => (IsValue && !IsFixedValue) || Type == BlockTypes.Counter || IsTable || IsFormula
+                                 || (IsCalc && CalcKind.Value != BlockTypes.CalcNames);
+
     // ── 머리글 자동 인식 안내 ────────────────────────────────────────
     private string _autoNote = "";
     /// <summary>표·명단 행을 드래그했을 때 머리글에서 찾은 열 (예: "머리글에서 찾음: 이름 A · 금일 H")</summary>
@@ -341,7 +381,7 @@ public class SetupItemViewModel : ViewModelBase
     public bool HasSuffix     => Type is FieldTypes.Input or FieldTypes.Photo || (Type == BlockTypes.Value && !IsFixedValue);
 
     public bool IsBlock   => BlockTypes.IsBlock(Type);
-    public bool HasKey    => IsBlock && Type != BlockTypes.Date;
+    public bool HasKey    => IsBlock && Type is not (BlockTypes.Date or BlockTypes.Formula);
     public bool IsValue   => Type == BlockTypes.Value;
     public bool IsDate    => Type == BlockTypes.Date;
     public bool IsLines   => Type == BlockTypes.Lines;
@@ -349,6 +389,12 @@ public class SetupItemViewModel : ViewModelBase
     public bool IsTable   => Type == BlockTypes.Table;
     public bool IsCalc    => Type == BlockTypes.Calc;
     public bool IsPhotos  => Type == BlockTypes.Photos && !IsHwpx;
+    public bool IsFormula => Type == BlockTypes.Formula;
+
+    /// <summary>이 칸을 이미 쓰는 항목인지 (칸을 고를 때 "이미 '날씨' 가 쓰는 칸" 안내)</summary>
+    public bool UsesCell(string cell) =>
+        Cell == cell || TotalCell == cell || PrevCell == cell || ValueCell == cell || Cells.Contains(cell)
+        || PhotoAreas.Any(a => a.CaptionCell == cell);
     public bool IsLegacy  => BlockMigration.IsLegacy(Type);
 
     /// <summary>카드에 보여 줄 지정 내용 요약 (예: "사진 D12 · 값 E12 · 10:00")</summary>
@@ -363,6 +409,7 @@ public class SetupItemViewModel : ViewModelBase
         FieldTypes.EquipmentTable or FieldTypes.PersonnelTable or BlockTypes.Table or BlockTypes.Roster =>
             StartRow == 0 ? "" : $"{StartRow}~{EndRow}행 · " + string.Join(" ", ColKeys.Where(k => ColOf(k) != null).Select(k => $"{ColTitle(k)} {ColOf(k)}")),
         BlockTypes.Calc => SourcesText.Length == 0 ? Cell ?? "" : Join(Cell, $"= {CalcKind.Label.Split(' ')[0]}({SourcesText})"),
+        BlockTypes.Formula => Join(Cell, _formula.Length == 0 ? null : $"= {_formula}"),
         BlockTypes.Photos => PhotoAreas.Count == 0 ? "" : $"사진 칸 {PhotoAreas.Count}개" + (SinglePhotoArea == null ? "" : " · 1장일 때 자리 있음"),
         _ => Cell ?? (IsValue ? "칸 없음 (계산에만 사용)" : ""),
     };
@@ -379,6 +426,7 @@ public class SetupItemViewModel : ViewModelBase
         BlockTypes.Value   => true,   // 칸이 없으면 계산에만 쓰는 입력
         BlockTypes.Calc    => Cell != null && SourcesText.Trim().Length > 0,
         BlockTypes.Photos  => PhotoAreas.Count > 0,
+        BlockTypes.Formula => Cell != null && BlockFormula.Check(_formula) == null,
         _ => Cell != null,
     };
 
@@ -426,6 +474,8 @@ public class SetupItemViewModel : ViewModelBase
     public ICommand AddPhotoAreaCommand    { get; }
     public ICommand PickSinglePhotoCommand { get; }
     public ICommand ClearPhotoAreasCommand { get; }
+    public ICommand InsertYesterdayCellCommand { get; }
+    public ICommand InsertTodayCellCommand     { get; }
 
     public SetupItemViewModel(ISetupHost host, string id, string label, string type)
     {
@@ -452,6 +502,8 @@ public class SetupItemViewModel : ViewModelBase
         AddPhotoAreaCommand    = new RelayCommand(_ => _host.StartPick(this, PickKind.PhotoRange));
         PickSinglePhotoCommand = new RelayCommand(_ => _host.StartPick(this, PickKind.SingleRange), _ => PhotoAreas.Count > 0);
         ClearPhotoAreasCommand = new RelayCommand(_ => { PhotoAreas = []; SinglePhotoArea = null; Changed(); }, _ => PhotoAreas.Count > 0);
+        InsertYesterdayCellCommand = new RelayCommand(_ => _host.StartPick(this, PickKind.FormulaYesterday));
+        InsertTodayCellCommand     = new RelayCommand(_ => _host.StartPick(this, PickKind.FormulaCell));
     }
 
     /// <summary>이 항목을 처음 지정할 때 Excel 에서 무엇을 골라야 하는지</summary>
@@ -509,6 +561,7 @@ public class SetupItemViewModel : ViewModelBase
         OnPropertyChanged(nameof(HasSuffix));
         OnPropertyChanged(nameof(HasOwnSheet));
         OnPropertyChanged(nameof(PhotoAreasText));
+        OnPropertyChanged(nameof(HasZeroOption));
     }
 
     /// <summary>엑셀/한글 전환 시 표시 갱신</summary>
@@ -560,8 +613,9 @@ public class SetupItemViewModel : ViewModelBase
             _placeholder = f.Placeholder, _totalCell = f.TotalCell, _prevCell = f.PrevCell, _sheet = f.Sheet,
             _key = f.Key ?? "", _fixedValue = f.FixedValue ?? "", _prefix = f.Prefix ?? "", _startFrom = f.StartFrom ?? "",
             _sourcesText = string.Join(", ", f.Sources ?? []), _rosterKey = f.RosterKey ?? "",
-            _roleMapText = FormatRoleMap(f.RoleMap),
+            _roleMapText = FormatRoleMap(f.RoleMap), _formula = f.Formula ?? "",
         };
+        item._zeroAs = ZeroChoiceList.FirstOrDefault(c => c.Value == (f.ZeroAs ?? "")) ?? ZeroChoiceList[0];
         item._valueSource = ValueSourceList.FirstOrDefault(c => c.Value == (f.ValueSource ?? BlockTypes.SourceInput)) ?? ValueSourceList[0];
         item._calcKind    = CalcKindList.FirstOrDefault(c => c.Value == (f.CalcKind ?? BlockTypes.CalcSum)) ?? CalcKindList[0];
         if (!string.IsNullOrWhiteSpace(f.DateFormat)) item._dateFormat = f.DateFormat;
@@ -590,8 +644,12 @@ public class SetupItemViewModel : ViewModelBase
         if (IsBlock)
         {
             f.Key = NullIfEmpty(Key);
+            f.ZeroAs = HasZeroOption ? NullIfEmpty(ZeroAs.Value) : null;
             switch (Type)
             {
+                case BlockTypes.Formula:
+                    f.Formula = NullIfEmpty(Formula);
+                    break;
                 case BlockTypes.Value:
                     f.ValueSource = ValueSource.Value == BlockTypes.SourceInput ? null : ValueSource.Value;
                     f.FixedValue  = IsFixedValue ? FixedValue : null;
@@ -661,6 +719,7 @@ public class SetupItemViewModel : ViewModelBase
             case BlockTypes.Value:
             case BlockTypes.Date:
             case BlockTypes.Calc:
+            case BlockTypes.Formula:
                 f.Cell = Cell;
                 break;
             default:
@@ -728,6 +787,12 @@ public class RoleMapRow
     public string RowName { get; }
     public ObservableCollection<KeyChoice> Jobs { get; }
     public RoleMapRow(string rowName, IEnumerable<KeyChoice> jobs) { RowName = rowName; Jobs = new(jobs); }
+}
+
+/// <summary>칸을 고르면 위쪽에 뜨는 "이 칸은?" 선택지 하나</summary>
+public record CellChoice(string Icon, string Label, string Hint, ICommand Command)
+{
+    public string Display => $"{Icon}  {Label}";
 }
 
 /// <summary>표 카드의 열 지정 버튼 하나</summary>

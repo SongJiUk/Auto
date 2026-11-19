@@ -232,6 +232,9 @@ public static class GenericExcelWriter
             return outputPath;
         }
 
+        // 식 블록의 [어제 칸] 은 앞 날짜 파일에서 미리 읽는다 (덮어쓰기 전에)
+        var yesterday = ReadYesterdayForFormulas(input.Date, docConfig, baseDir, outputFolder, notes);
+
         // ── 2. 바탕 파일 복사 — 서식·앞 날짜 파일은 절대 수정하지 않는다 ──
         EnsureDirectoryExists(outputPath);
         File.Copy(basePath, outputPath, overwrite: true);
@@ -248,11 +251,11 @@ public static class GenericExcelWriter
                              ?? throw new InvalidOperationException(
                                     $"시트 '{sheet}'를 찾을 수 없습니다.\n파일: {outputPath}");
 
-                var ctx = new WriteContext(input, docConfig, sheet, doc, wsPart, photoLoader, notes);
-                foreach (var field in docConfig.Fields.Where(f => string.IsNullOrWhiteSpace(f.Sheet)))
+                var ctx = new WriteContext(input, docConfig, sheet, doc, wsPart, photoLoader, notes, yesterday);
+                foreach (var field in FormulasLast(docConfig.Fields.Where(f => string.IsNullOrWhiteSpace(f.Sheet))))
                     WriteField(field, ctx);
             }
-            foreach (var group in docConfig.Fields.Where(f => !string.IsNullOrWhiteSpace(f.Sheet)).GroupBy(f => f.Sheet!.Trim()))
+            foreach (var group in FormulasLast(docConfig.Fields.Where(f => !string.IsNullOrWhiteSpace(f.Sheet))).GroupBy(f => f.Sheet!.Trim()))
             {
                 var wsPart = CellHelper.FindWorksheetPart(wbPart, group.Key);
                 if (wsPart == null)
@@ -260,7 +263,7 @@ public static class GenericExcelWriter
                     notes?.Add($"{docConfig.Name}: 시트 '{group.Key}' 가 없어 {string.Join(", ", group.Select(f => f.Label))} 을(를) 쓰지 못함");
                     continue;
                 }
-                var ctx = new WriteContext(input, docConfig, group.Key, doc, wsPart, photoLoader, notes);
+                var ctx = new WriteContext(input, docConfig, group.Key, doc, wsPart, photoLoader, notes, yesterday);
                 foreach (var field in group) WriteField(field, ctx);
             }
 
@@ -294,11 +297,32 @@ public static class GenericExcelWriter
         return prev.Value.Path;
     }
 
+    /// <summary>식은 다른 항목을 다 쓴 뒤에 계산한다 ([H20] 이 오늘 쓴 값을 읽도록). 나머지 순서는 그대로.</summary>
+    private static IEnumerable<FieldConfig> FormulasLast(IEnumerable<FieldConfig> fields) =>
+        fields.OrderBy(f => f.Type == BlockTypes.Formula ? 1 : 0);
+
+    /// <summary>식 블록의 [어제 칸] 값. 앞 날짜 파일이 없으면 빈 값(0)으로 계산하고 알린다.</summary>
+    private static Dictionary<string, string> ReadYesterdayForFormulas(DateTime date, DocumentConfig doc, string baseDir,
+                                                                       string outputFolder, List<string>? notes)
+    {
+        bool needs = doc.Fields.Any(f => f.Type == BlockTypes.Formula
+                                         && BlockFormula.Refs(f.Formula).Any(r => r.Kind == BlockFormula.KindYesterday));
+        if (!needs) return [];
+        var prev = FindPreviousFile(date, doc.OutputPattern, baseDir, outputFolder);
+        if (prev == null)
+        {
+            notes?.Add($"{doc.Name}: 어제 파일이 없어 식의 [어제 칸] 을 0(빈 칸)으로 계산했습니다");
+            return [];
+        }
+        return BlockEngine.ReadYesterdayCells(prev.Value.Path, doc);
+    }
+
     /// <summary>필드 하나를 쓸 때 필요한 정보 묶음</summary>
     private sealed record WriteContext(
         DailyInput Input, DocumentConfig Doc, string Sheet,
         SpreadsheetDocument Package, WorksheetPart Ws,
-        Func<string, int, int, byte[]>? PhotoLoader, List<string>? Notes);
+        Func<string, int, int, byte[]>? PhotoLoader, List<string>? Notes,
+        IReadOnlyDictionary<string, string>? Yesterday = null);
 
     /// <summary>
     /// 단순 값 필드(날짜·텍스트·직접 입력 등)의 글자 값을 구한다. 엑셀과 한글 엔진이 함께 쓴다.
@@ -357,7 +381,7 @@ public static class GenericExcelWriter
         // 블록(사용자가 규칙을 고른 범용 항목)은 BlockEngine 이 쓴다
         if (BlockTypes.IsBlock(field.Type))
         {
-            BlockEngine.Write(field, c.Package, wsPart, input, c.Sheet, c.Notes, c.PhotoLoader);
+            BlockEngine.Write(field, c.Package, wsPart, input, c.Sheet, c.Notes, c.PhotoLoader, c.Yesterday);
             return;
         }
 

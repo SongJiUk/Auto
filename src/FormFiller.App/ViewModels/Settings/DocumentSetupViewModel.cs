@@ -114,7 +114,13 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
     public bool UseWeeklyDayDate { get => _useWeeklyDayDate; set => SetField(ref _useWeeklyDayDate, value); }
 
     private bool _includesSujangjae;
-    public bool IncludesSujangjae { get => _includesSujangjae; set => SetField(ref _includesSujangjae, value); }
+    public bool IncludesSujangjae { get => _includesSujangjae; set { if (SetField(ref _includesSujangjae, value)) OnPropertyChanged(nameof(ShowSujangjae)); } }
+
+    /// <summary>수장재 체크는 예전 방식 공사일보용 → 새 문서에서는 숨긴다 (이미 켠 문서·예전 항목이 있을 때만)</summary>
+    public bool ShowSujangjae => _includesSujangjae || HasLegacyItems;
+
+    /// <summary>예전 사진대지 슬롯은 이미 쓰는 문서에서만 보인다 (새 문서는 사진 자리 항목으로)</summary>
+    public bool ShowLegacyPhotoSlots => IsExcel && PhotoSheet.Length > 0;
 
     // ── 사진대지 슬롯 (예전 방식: 시트의 그림을 순서대로 교체) ──────────
 
@@ -125,7 +131,7 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
     public string SelectedPhotoSheet
     {
         get => _selectedPhotoSheet;
-        set { if (SetField(ref _selectedPhotoSheet, value)) ReloadPhotoSlotRows(); }
+        set { if (SetField(ref _selectedPhotoSheet, value)) { ReloadPhotoSlotRows(); OnPropertyChanged(nameof(ShowLegacyPhotoSlots)); } }
     }
 
     public string PhotoSheet => _selectedPhotoSheet == NoPhotoOption ? "" : _selectedPhotoSheet ?? "";
@@ -265,6 +271,7 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
         {
             OnPropertyChanged(nameof(HasNoItems));
             OnPropertyChanged(nameof(HasLegacyItems));
+            OnPropertyChanged(nameof(ShowSujangjae));
             if (e.NewItems != null)
                 foreach (SetupItemViewModel it in e.NewItems)
                     it.PropertyChanged += (_, pe) => { if (pe.PropertyName is nameof(SetupItemViewModel.Key) or nameof(SetupItemViewModel.Label)) RefreshKnownKeys(); };
@@ -283,7 +290,7 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
     {
         _otherDocKeys ??= AppConfigLoader.Load().Documents
             .Where(d => d.Id != _editing?.Id)
-            .SelectMany(d => d.Fields.Where(f => BlockTypes.IsBlock(f.Type) && f.Type != BlockTypes.Date).Select(BlockTypes.KeyOf))
+            .SelectMany(d => d.Fields.Where(f => BlockTypes.IsBlock(f.Type) && f.Type is not (BlockTypes.Date or BlockTypes.Formula)).Select(BlockTypes.KeyOf))
             .ToList();
         return Items.Where(i => i.HasKey).Select(i => i.EffectiveKey).Concat(_otherDocKeys)
                     .Where(k => k.Length > 0).Distinct().ToList();
@@ -645,6 +652,8 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
             PickKind.PhotoCaption => $"「{item.Label}」 사진 칸 {item.PhotoAreas.Count} 의 설명 칸을 클릭하세요. 없으면 [설명 칸 없음].",
             PickKind.SingleRange  => $"「{item.Label}」 사진이 1장인 날 넣을 자리를 드래그(예: 두 칸을 합친 자리)한 뒤 [확인]. 따로 없으면 칸 1 에 넣습니다.",
             PickKind.SingleCaption => $"「{item.Label}」 1장일 때 설명 칸을 클릭하세요. 없으면 [설명 칸 없음].",
+            PickKind.FormulaYesterday => $"「{item.Label}」 식에 넣을 칸을 클릭하세요. 어제 파일의 그 칸 값을 씁니다.",
+            PickKind.FormulaCell      => $"「{item.Label}」 식에 넣을 칸을 클릭하세요. 오늘 파일의 그 칸 값(다른 항목을 다 쓴 뒤)을 씁니다.",
             _ => "",
         };
 
@@ -707,6 +716,16 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
                 NextPickStep();
                 break;
 
+            case PickKind.FormulaYesterday when !sel.IsShapes:
+                item.AppendToFormula($"[어제 {sel.ActiveCell}]");
+                CancelPick();
+                break;
+
+            case PickKind.FormulaCell when !sel.IsShapes:
+                item.AppendToFormula($"[{sel.ActiveCell}]");
+                CancelPick();
+                break;
+
             case PickKind.PhotoCaption when !sel.IsShapes:
                 item.SetLastCaption(sel.ActiveCell);
                 NextPickStep();
@@ -728,9 +747,14 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
     /// <summary>[확인]: 여러 개를 고르는 단계(그림 여러 개, 행 범위)를 현재 선택으로 마친다.</summary>
     private void ConfirmPick()
     {
+        var sel = Bridge?.GetSelection();
+        if (sel != null) ConfirmPickWith(sel);
+    }
+
+    private void ConfirmPickWith(ExcelSelection sel)
+    {
         var item = _pickItem;
-        var sel  = Bridge?.GetSelection();
-        if (item == null || sel == null) return;
+        if (item == null) return;
 
         switch (_pickKind)
         {
@@ -811,15 +835,153 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
         }
 
         // 숫자 누계: 오늘 칸 → 누계 칸 → 전일 칸(선택)
+        // (전일 칸은 자동으로 묻지 않는다: 칸을 먼저 고르는 방식에서는 다음에 클릭한 칸이 전일로 잡혀 헷갈림.
+        //  필요하면 카드의 [전일 칸 (선택)])
         if (item.IsCounter && _pickKind == PickKind.Cell && item.TotalCell == null) { StartPick(item, PickKind.TotalCell); return; }
-        if (item.IsCounter && _pickKind == PickKind.TotalCell && item.PrevCell == null && !item.PrevSkipped)
-        { StartPick(item, PickKind.PrevCell); return; }
 
         CancelPick();
 
         if (_pickKind == PickKind.Shapes && item.Presets.Count == 0)
             MessageBox.Show("이제 Excel 에서 그림을 원하는 자리로 끌어다 놓고,\n항목 카드의 [지금 위치 저장]을 누르세요.\n위치를 여러 개 저장해 두면 매일 그중에서 고를 수 있습니다.",
                             "위치 저장 안내", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // ── 칸 먼저 고르기: Excel 에서 칸을 고르면 "이 칸은?" 선택지 ────
+    // ════════════════════════════════════════════════════════════════
+
+    private ExcelSelection? _freeSel;
+
+    /// <summary>고른 칸·범위·그림에 맞는 선택지 (위쪽 "이 칸은?" 상자)</summary>
+    public ObservableCollection<CellChoice> CellChoices { get; } = [];
+    public bool HasCellChoices => CellChoices.Count > 0;
+
+    private string _selectionText = "";
+    /// <summary>예: "선택한 칸: H20" / "선택한 범위: A9:A17 (9줄)"</summary>
+    public string SelectionText { get => _selectionText; private set => SetField(ref _selectionText, value); }
+
+    private string _selectionOwner = "";
+    /// <summary>이미 그 칸을 쓰는 항목이 있으면 안내 (예: "이 칸은 '날씨' 항목이 씁니다")</summary>
+    public string SelectionOwner { get => _selectionOwner; private set { if (SetField(ref _selectionOwner, value)) OnPropertyChanged(nameof(HasSelectionOwner)); } }
+    public bool HasSelectionOwner => _selectionOwner.Length > 0;
+
+    public ICommand CloseCellChoicesCommand => new RelayCommand(_ => ClearCellChoices());
+
+    /// <summary>새 항목을 만들어 목록에 넣었을 때 (View 가 그 카드로 스크롤)</summary>
+    public event EventHandler<SetupItemViewModel>? ItemCreated;
+
+    /// <summary>View 가 고르는 중이 아닐 때 Excel 선택이 바뀌면 부른다.</summary>
+    public void OnFreeSelection(ExcelSelection sel)
+    {
+        if (IsPicking || IsHwpx) return;
+        _freeSel = sel;
+        CellChoices.Clear();
+
+        if (sel.IsShapes)
+        {
+            SelectionText = $"선택한 그림: {string.Join(", ", sel.ShapeNames)}";
+            Add("📷", "사진 자리 (그날 장수만큼)", BlockTypes.Photos, "이 그림 자리에 매일 그날 사진을 넣습니다. 칸이 여러 개면 이어서 지정합니다.");
+            if (sel.ShapeNames.Count == 1)
+                Add("📷", "사진 + 옆 칸 측정값", FieldTypes.Photo, "이 그림을 매일 사진으로 바꾸고, 옆 칸에 측정값을 씁니다.");
+            Add("📍", "그림 위치 (매일 고르기)", FieldTypes.ShapePosition, "이 그림·글상자를 저장해 둔 위치 중 하나로 옮깁니다.");
+        }
+        else if (sel.IsOneCell)
+        {
+            SelectionText = $"선택한 칸: {sel.ActiveCell}";
+            Add("✏️", "매일 입력", BlockTypes.Value, "메인 화면에서 매일 입력합니다 (어제 값이 미리 채워짐).");
+            Add("📌", "항상 같은 값", BlockTypes.Value, "매일 같은 값을 씁니다.", i => i.ValueSource = SetupItemViewModel.ValueSourceList[2]);
+            Add("📅", "날짜", BlockTypes.Date, "만드는 날짜를 고른 형식으로 씁니다.");
+            Add("➕", "누계 (오늘 + 어제 누계)", BlockTypes.Counter, "이 칸은 오늘 숫자. 이어서 누계 칸을 클릭합니다.");
+            Add("🧾", "식 (직접 계산)", BlockTypes.Formula, "어제 칸·오늘 칸·입력값으로 계산합니다. 예) [어제 H20] + [입력 장비]");
+            Add("🧮", "다른 항목 합계·이름 나열", BlockTypes.Calc, "표의 금일 합계, 명단 인원 수, 투입 장비 이름 나열 등.");
+            if (SheetChoices.Count(c => c.IsChecked) > 1)
+                Add("✏️", "시트마다 따로 입력", FieldTypes.Input, "같은 모양 시트마다 다른 값을 입력합니다.");
+        }
+        else
+        {
+            SelectionText = $"선택한 범위: {RangeOf(sel)} ({sel.RowCount}줄 × {sel.ColCount}열)";
+            Add("📝", "여러 줄 글", BlockTypes.Lines, "한 줄씩 입력합니다 (작업사항 등). 첫 열에 씁니다.");
+            if (sel.ColCount > 1)
+            {
+                Add("📊", "표 (줄마다 전일·금일·누계)", BlockTypes.Table, "머리글을 읽어 열을 찾고, 못 찾은 열만 클릭합니다.");
+                Add("👥", "명단 (한 줄에 한 사람)", BlockTypes.Roster, "직종·성명·작업내용. 메인 화면에서 오늘 나온 사람을 체크합니다.");
+            }
+            Add("📷", "사진 자리 (그날 장수만큼)", BlockTypes.Photos, "이 범위에 그날 사진을 꽉 채워 넣습니다. 칸이 여러 개면 이어서 지정합니다.");
+        }
+
+        string? owner = Items.FirstOrDefault(i => i.UsesCell(sel.ActiveCell))?.Label;
+        SelectionOwner = owner == null ? "" : $"이 칸은 이미 '{owner}' 항목이 씁니다. 새로 만들면 둘 다 씁니다.";
+        OnPropertyChanged(nameof(HasCellChoices));
+
+        void Add(string icon, string label, string type, string hint, Action<SetupItemViewModel>? preset = null) =>
+            CellChoices.Add(new CellChoice(icon, label, hint, new RelayCommand(_ => CreateFromSelection(type, label, preset))));
+    }
+
+    public void ClearCellChoices()
+    {
+        _freeSel = null;
+        CellChoices.Clear();
+        SelectionOwner = "";
+        OnPropertyChanged(nameof(HasCellChoices));
+    }
+
+    private static string RangeOf(ExcelSelection sel) =>
+        $"{HeaderDetector.ColLetter(sel.Col)}{sel.Row}:{HeaderDetector.ColLetter(sel.Col + sel.ColCount - 1)}{sel.Row + sel.RowCount - 1}";
+
+    /// <summary>고른 칸으로 항목을 만들고, 그 종류에 남은 단계(누계 칸, 표의 열, 사진 설명 칸 등)를 이어서 묻는다.</summary>
+    private void CreateFromSelection(string type, string choiceLabel, Action<SetupItemViewModel>? preset)
+    {
+        var sel = _freeSel;
+        if (sel == null) return;
+        ClearCellChoices();
+
+        string label = UniqueLabel(GuessLabel(sel) ?? DefaultLabel(type, choiceLabel));
+        var item = new SetupItemViewModel(this, MakeId(label), label, type);
+        preset?.Invoke(item);
+        Items.Add(item);
+        ItemCreated?.Invoke(this, item);
+
+        // 고른 선택을 그대로 첫 단계로 쓴다 (다시 클릭하지 않게)
+        StartPick(item, item.MainPickKind);
+        if (PickNeedsConfirm) ConfirmPickWith(sel);
+        else OnExcelSelectionChanged(sel);
+    }
+
+    /// <summary>
+    /// 칸 이름 짐작: 왼쪽 칸(3칸까지) 글자, 없으면 위 칸 글자. 범위면 첫 칸 위 머리글.
+    /// 서식마다 다른 이름을 코드에 두지 않고 서식에 적힌 글자를 쓴다. 카드에서 고칠 수 있다.
+    /// </summary>
+    private string? GuessLabel(ExcelSelection sel)
+    {
+        if (Bridge == null || sel.IsShapes) return null;
+        var tries = new List<(int Row, int Col)>();
+        if (sel.IsOneCell) for (int c = sel.Col - 1; c >= Math.Max(1, sel.Col - 3); c--) tries.Add((sel.Row, c));
+        if (sel.Row > 1) tries.Add((sel.Row - 1, sel.Col));
+        foreach (var (r, c) in tries)
+        {
+            string t;
+            try { t = Bridge.GetCellText(r, c); } catch { continue; }
+            t = new string(t.Replace("\n", " ").Where(ch => !char.IsControl(ch)).ToArray()).Trim().TrimEnd(':', '：').Trim();
+            if (t.Length == 0 || BlockTypes.ParseNumber(t) != null) continue;
+            return t.Length > 20 ? t[..20] : t;
+        }
+        return null;
+    }
+
+    private static string DefaultLabel(string type, string choiceLabel) => type switch
+    {
+        BlockTypes.Date    => "날짜",
+        BlockTypes.Photos  => "사진",
+        BlockTypes.Formula => "계산",
+        _                  => choiceLabel.Split(' ')[0],
+    };
+
+    /// <summary>같은 문서에 같은 이름이 있으면 번호를 붙인다 (같은 이름 = 같은 입력이 되므로)</summary>
+    private string UniqueLabel(string label)
+    {
+        string result = label;
+        for (int n = 2; Items.Any(i => i.Label.Trim() == result); n++) result = $"{label} {n}";
+        return result;
     }
 
     // ── 그림 위치 저장 / 보기 ────────────────────────────────────────

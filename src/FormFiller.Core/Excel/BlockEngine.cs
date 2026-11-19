@@ -20,8 +20,10 @@ public static class BlockEngine
     // ════════════════════════════════════════════════════════════════
 
     /// <param name="photoLoader">(사진 경로, 너비 px, 높이 px) → JPEG 바이트. 사진 구역 블록에서만 쓴다.</param>
+    /// <param name="yesterday">식 블록의 [어제 칸] 값 ("시트!칸" → 글자). 없으면 빈 칸(0)으로 계산.</param>
     public static void Write(FieldConfig f, SpreadsheetDocument pkg, WorksheetPart ws, DailyInput input,
-                             string sheet, List<string>? notes, Func<string, int, int, byte[]>? photoLoader = null)
+                             string sheet, List<string>? notes, Func<string, int, int, byte[]>? photoLoader = null,
+                             IReadOnlyDictionary<string, string>? yesterday = null)
     {
         string key = BlockTypes.KeyOf(f);
         var v = input.Block(key);
@@ -31,7 +33,7 @@ public static class BlockEngine
             case BlockTypes.Date:
             case BlockTypes.Calc:
             {
-                string? text = TextFor(f, input);
+                string? text = RawText(f, input);
                 if (text == null) return;                                  // 어제 값 그대로
                 if (text.Length == 0 && f.Type == BlockTypes.Value)
                 {
@@ -40,9 +42,14 @@ public static class BlockEngine
                 }
                 bool asNumber = f.Type == BlockTypes.Calc ? f.CalcKind != BlockTypes.CalcNames
                               : f.Type == BlockTypes.Value && string.IsNullOrEmpty(f.Suffix);
+                if (IsZero(f, text)) { WriteZero(pkg, ws, f.Cell, f.ZeroAs); break; }
                 WriteText(pkg, ws, f.Cell, text, asNumber);
                 break;
             }
+
+            case BlockTypes.Formula:
+                WriteFormula(f, pkg, ws, input, sheet, notes, yesterday);
+                break;
 
             case BlockTypes.Lines:
                 if (f.Cells is not { Count: > 0 }) return;
@@ -54,9 +61,9 @@ public static class BlockEngine
                 break;
 
             case BlockTypes.Counter:
-                WriteNumber(ws, f.Cell, v.Today);
-                WriteNumber(ws, f.PrevCell, v.Prev);
-                WriteNumber(ws, f.TotalCell, v.Prev + v.Today);
+                WriteNumber(pkg, ws, f.Cell, v.Today, f.ZeroAs);
+                WriteNumber(pkg, ws, f.PrevCell, v.Prev, f.ZeroAs);
+                WriteNumber(pkg, ws, f.TotalCell, v.Prev + v.Today, f.ZeroAs);
                 break;
 
             case BlockTypes.Table:
@@ -74,9 +81,17 @@ public static class BlockEngine
     }
 
     /// <summary>
-    /// 칸 하나짜리 블록의 글자 값 (엑셀·한글 공통). null 이면 "쓰지 않음"(어제 값 그대로).
+    /// 칸 하나짜리 블록의 글자 값 (한글 자리 글자용). null 이면 "쓰지 않음"(어제 값 그대로).
+    /// "0 일 때 표시"를 적용한다. 식은 오늘 입력만으로 계산한다 (한글 서식에는 칸이 없어서).
     /// </summary>
     public static string? TextFor(FieldConfig f, DailyInput input)
+    {
+        string? text = f.Type == BlockTypes.Formula ? FormulaText(f, input, _ => null, out _) : RawText(f, input);
+        return text != null && IsZero(f, text) ? BlockTypes.ZeroText(f.ZeroAs) : text;
+    }
+
+    /// <summary>칸 하나짜리 블록의 글자 값 (0 표시 적용 전)</summary>
+    private static string? RawText(FieldConfig f, DailyInput input)
     {
         var v = input.Block(BlockTypes.KeyOf(f));
         return f.Type switch
@@ -121,10 +136,87 @@ public static class BlockEngine
         else CellHelper.SetCellString(pkg, ws, cell, text);
     }
 
-    private static void WriteNumber(WorksheetPart ws, string? cell, decimal value)
+    /// <summary>숫자를 쓴다. 0 이고 "0 일 때 표시"가 정해져 있으면 그 글자(빈칸 / -)를 쓴다.</summary>
+    private static void WriteNumber(SpreadsheetDocument pkg, WorksheetPart ws, string? cell, decimal value, string? zeroAs)
     {
         if (string.IsNullOrEmpty(cell) || CellHelper.HasFormula(ws, cell)) return;
+        if (value == 0 && BlockTypes.ZeroText(zeroAs) != null) { WriteZero(pkg, ws, cell, zeroAs); return; }
         CellHelper.SetCellNumber(ws, cell, value);
+    }
+
+    private static void WriteZero(SpreadsheetDocument pkg, WorksheetPart ws, string? cell, string? zeroAs) =>
+        WriteText(pkg, ws, cell, BlockTypes.ZeroText(zeroAs) ?? "0", asNumber: zeroAs == null);
+
+    /// <summary>"0 일 때 표시"가 정해져 있고 값이 0 인지 (단위가 붙어 있어도: "0dB")</summary>
+    private static bool IsZero(FieldConfig f, string text) =>
+        BlockTypes.ZeroText(f.ZeroAs) != null && BlockTypes.ParseNumber(StripSuffix(text.Trim(), f.Suffix)) == 0;
+
+    // ── 식 ───────────────────────────────────────────────────────────
+
+    /// <summary>식을 계산해 쓴다. 숫자면 숫자 칸, 글자면 글자 칸. 틀린 식은 쓰지 않고 알린다.</summary>
+    private static void WriteFormula(FieldConfig f, SpreadsheetDocument pkg, WorksheetPart ws, DailyInput input,
+                                     string sheet, List<string>? notes, IReadOnlyDictionary<string, string>? yesterday)
+    {
+        if (string.IsNullOrEmpty(f.Cell)) return;
+        object? result = Evaluate(f, input, r => r.Kind switch
+        {
+            BlockFormula.KindYesterday => yesterday != null && yesterday.TryGetValue($"{sheet}!{r.Arg}", out var y) ? y : null,
+            BlockFormula.KindCell      => CellHelper.GetCellValue(ws, r.Arg),
+            _                          => null,
+        }, out string? error);
+
+        if (error != null) { notes?.Add($"[{sheet}] {f.Label}: 식이 틀려 쓰지 않음 — {error}"); return; }
+        if (result is decimal d) WriteNumber(pkg, ws, f.Cell, d, f.ZeroAs);
+        else WriteText(pkg, ws, f.Cell, BlockFormula.ToText(result), asNumber: false);
+    }
+
+    /// <summary>식의 글자 결과 (틀리면 null)</summary>
+    private static string? FormulaText(FieldConfig f, DailyInput input, Func<BlockFormula.Ref, object?> cells, out string? error)
+    {
+        var result = Evaluate(f, input, cells, out error);
+        return error == null ? BlockFormula.ToText(result) : null;
+    }
+
+    /// <summary>식 계산. [입력 이름] 은 오늘 입력값, 나머지 참조는 cells 가 알려 준다.</summary>
+    private static object? Evaluate(FieldConfig f, DailyInput input, Func<BlockFormula.Ref, object?> cells, out string? error)
+    {
+        error = null;
+        try
+        {
+            return BlockFormula.Evaluate(f.Formula ?? "", r => r.Kind == BlockFormula.KindInput ? InputValue(input, r.Arg) : cells(r));
+        }
+        catch (FormatException ex) { error = ex.Message; return null; }
+    }
+
+    /// <summary>[입력 이름] 의 값: 표 = 금일 합계, 명단 = 인원 수, 누계 = 오늘, 값 = 입력한 글자</summary>
+    private static object? InputValue(DailyInput input, string key)
+    {
+        if (!input.Blocks.TryGetValue(key, out var v)) return null;
+        if (v.Rows.Count > 0 || v.People.Count > 0 || v.Today != 0) return NumberOf(v);
+        if (v.Lines.Count > 0) return string.Join("\n", v.Lines);
+        return v.Text;
+    }
+
+    /// <summary>식들의 [어제 칸] 을 어제 파일에서 읽는다 ("시트!칸" → 글자). Generate 가 파일을 쓰기 전에 부른다.</summary>
+    public static Dictionary<string, string> ReadYesterdayCells(string filePath, DocumentConfig doc)
+    {
+        var result = new Dictionary<string, string>();
+        var formulas = doc.Fields.Where(f => f.Type == BlockTypes.Formula).ToList();
+        if (formulas.Count == 0 || !File.Exists(filePath)) return result;
+
+        using var pkg = CellHelper.OpenReadOnly(filePath);
+        foreach (var f in formulas)
+        {
+            var sheets = string.IsNullOrWhiteSpace(f.Sheet) ? doc.TargetSheets() : [f.Sheet.Trim()];
+            foreach (string sheet in sheets)
+            {
+                var ws = CellHelper.FindWorksheetPart(pkg.WorkbookPart!, sheet);
+                if (ws == null) continue;
+                foreach (var r in BlockFormula.Refs(f.Formula).Where(r => r.Kind == BlockFormula.KindYesterday))
+                    result.TryAdd($"{sheet}!{r.Arg}", CellHelper.GetCellValue(ws, r.Arg) ?? "");
+            }
+        }
+        return result;
     }
 
     // ── 표 ───────────────────────────────────────────────────────────
@@ -147,9 +239,9 @@ public static class BlockEngine
 
         void Set(int row, decimal prev, decimal today)
         {
-            WriteNumber(ws, prevCol  is null ? null : $"{prevCol}{row}", prev);
-            WriteNumber(ws, $"{todayCol}{row}", today);
-            WriteNumber(ws, totalCol is null ? null : $"{totalCol}{row}", prev + today);
+            WriteNumber(pkg, ws, prevCol  is null ? null : $"{prevCol}{row}", prev, f.ZeroAs);
+            WriteNumber(pkg, ws, $"{todayCol}{row}", today, f.ZeroAs);
+            WriteNumber(pkg, ws, totalCol is null ? null : $"{totalCol}{row}", prev + today, f.ZeroAs);
         }
 
         var used = new bool[rows.Count];

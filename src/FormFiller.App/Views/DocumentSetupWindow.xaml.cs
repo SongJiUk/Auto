@@ -21,6 +21,7 @@ public partial class DocumentSetupWindow : Window, IExcelBridge
     private ExcelHwndHost?   _excelHost;
     private DispatcherTimer? _pollTimer;
     private string?          _pickBaseline;   // 고르기 시작할 때의 선택 (이후 "바뀐" 선택만 지정)
+    private string?          _freeBaseline;   // 고르는 중이 아닐 때 마지막으로 본 선택
 
     private DocumentSetupViewModel Vm => (DocumentSetupViewModel)DataContext;
 
@@ -36,6 +37,10 @@ public partial class DocumentSetupWindow : Window, IExcelBridge
         Vm.PropertyChanged += OnVmChanged;
         Vm.SaveSucceeded   += (_, _) => DialogResult = true;
         Vm.PickStarted     += (_, _) => _pickBaseline = SafeSelection()?.Signature;
+        // 칸을 골라 새 항목을 만들면 그 카드가 보이게 스크롤
+        Vm.ItemCreated     += (_, item) => Dispatcher.BeginInvoke(
+            () => (ItemsList.ItemContainerGenerator.ContainerFromItem(item) as FrameworkElement)?.BringIntoView(),
+            DispatcherPriority.Loaded);
 
         // 창이 없어지기 "전에" Excel 창의 소유자 지정을 풀어 둔다 (ExcelHwndHost.Detach 설명 참고)
         Closing += (_, _) => _excelHost?.Detach();
@@ -67,6 +72,8 @@ public partial class DocumentSetupWindow : Window, IExcelBridge
                 PreviewBorder.BorderBrush     = Vm.IsPicking ? System.Windows.Media.Brushes.DodgerBlue
                                                              : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xCB, 0xD5, 0xE0));
                 PreviewBorder.BorderThickness = new Thickness(Vm.IsPicking ? 3 : 1);
+                // 고르기가 끝나면 방금 고른 칸으로 "이 칸은?" 이 다시 뜨지 않게 지금 선택을 기억해 둔다
+                if (!Vm.IsPicking) _freeBaseline = SafeSelection()?.Signature;
                 break;
         }
     }
@@ -187,7 +194,16 @@ public partial class DocumentSetupWindow : Window, IExcelBridge
         }
         catch { return; }   // Excel 이 바쁨(셀 편집 중 등) → 다음에
 
-        if (!Vm.IsPicking) return;
+        if (!Vm.IsPicking)
+        {
+            // 고르는 중이 아니면: 칸을 고를 때마다 "이 칸은?" 선택지를 보여 준다
+            var free = SafeSelection();
+            if (free == null || free.Signature == _freeBaseline) return;
+            _freeBaseline = free.Signature;
+            Vm.OnFreeSelection(free);
+            return;
+        }
+        _freeBaseline = null;
 
         var sel = SafeSelection();
         if (sel == null || sel.Signature == _pickBaseline) return;
@@ -231,8 +247,12 @@ public partial class DocumentSetupWindow : Window, IExcelBridge
         }
         catch { /* 칸 선택 */ }
 
+        // 병합된 칸 하나를 고른 것도 "칸 하나"로 본다 (선택 범위 = 그 칸의 병합 범위)
+        int rows = (int)sel.Rows.Count, cols = (int)sel.Columns.Count;
+        bool one = rows * cols == 1;
+        if (!one) try { one = (string)sel.Address(false, false) == (string)_xl.ActiveCell.MergeArea.Address(false, false); } catch { }
         return new ExcelSelection(false, (string)_xl.ActiveCell.Address(false, false),
-                                  (int)sel.Row, (int)sel.Column, (int)sel.Rows.Count, [], [], (int)sel.Columns.Count);
+                                  (int)sel.Row, (int)sel.Column, rows, [], [], cols, one);
     }
 
     /// <summary>지금 시트 칸에 보이는 글자 (병합 칸은 왼쪽 위 칸에 글자가 있다)</summary>

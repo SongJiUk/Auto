@@ -311,6 +311,15 @@ public class FieldConfig
     /// </summary>
     public Dictionary<string, List<string>>? RoleMap { get; set; }
 
+    /// <summary>
+    /// formula: 식. [어제 H20] = 어제 파일의 칸, [H20] = 오늘 파일의 칸(다른 항목을 다 쓴 뒤), [입력 이름] = 오늘 입력값,
+    /// 숫자, "글자", + - * / ( ), &amp; (글자 이어붙이기). 예) [어제 H20] + [입력 장비]
+    /// </summary>
+    public string? Formula { get; set; }
+
+    /// <summary>숫자 결과가 0 일 때: null(0 그대로) | "blank"(빈칸) | "dash"(-)</summary>
+    public string? ZeroAs { get; set; }
+
     /// <summary>photos: 사진 칸들 (순서대로 채운다). 예) 위 칸 A4:H15 + 설명 B16, 아래 칸 A17:H28 + 설명 B29</summary>
     public List<PhotoArea>? PhotoAreas { get; set; }
 

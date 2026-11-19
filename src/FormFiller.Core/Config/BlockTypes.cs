@@ -18,9 +18,20 @@ namespace FormFiller.Core.Config;
 public static class BlockTypes
 {
     public const string Value = "value", Date = "date", Lines = "lines", Counter = "counter",
-                        Table = "table", Roster = "roster", Calc = "calc", Photos = "photos";
+                        Table = "table", Roster = "roster", Calc = "calc", Photos = "photos", Formula = "formula";
 
-    public static readonly string[] All = [Value, Date, Lines, Counter, Table, Roster, Calc, Photos];
+    public static readonly string[] All = [Value, Date, Lines, Counter, Table, Roster, Calc, Photos, Formula];
+
+    // ── 0 일 때 표시 ───────────────────────────────────────────────────
+    public const string ZeroBlank = "blank", ZeroDash = "dash";
+
+    /// <summary>0 대신 쓸 글자 (null 이면 0 그대로)</summary>
+    public static string? ZeroText(string? zeroAs) => zeroAs switch
+    {
+        ZeroBlank => "",
+        ZeroDash  => "-",
+        _         => null,
+    };
 
     public static bool IsBlock(string type) => All.Contains(type);
 
