@@ -357,7 +357,7 @@ public static class GenericExcelWriter
         // 블록(사용자가 규칙을 고른 범용 항목)은 BlockEngine 이 쓴다
         if (BlockTypes.IsBlock(field.Type))
         {
-            BlockEngine.Write(field, c.Package, wsPart, input, c.Sheet, c.Notes);
+            BlockEngine.Write(field, c.Package, wsPart, input, c.Sheet, c.Notes, c.PhotoLoader);
             return;
         }
 

@@ -13,13 +13,14 @@ namespace FormFiller.Core.Config;
 ///   table   표 (이름 줄마다 숫자)  — 열마다 역할: 이름·규격·전일·금일·누계. 금일을 명단에서 셀 수도 있다
 ///   roster  명단 (사람 한 줄씩)    — 열마다 역할: 직종·성명·작업내용. 사람 목록에서 오늘 나온 사람을 고른다
 ///   calc    계산                  — 다른 블록의 합계 / 이름 나열 / 명단 인원 수
+///   photos  사진 구역             — 사진 칸들(+설명 칸). 그날 장수만큼 채우고, 1장인 날 자리는 따로 정할 수 있다
 /// </summary>
 public static class BlockTypes
 {
     public const string Value = "value", Date = "date", Lines = "lines", Counter = "counter",
-                        Table = "table", Roster = "roster", Calc = "calc";
+                        Table = "table", Roster = "roster", Calc = "calc", Photos = "photos";
 
-    public static readonly string[] All = [Value, Date, Lines, Counter, Table, Roster, Calc];
+    public static readonly string[] All = [Value, Date, Lines, Counter, Table, Roster, Calc, Photos];
 
     public static bool IsBlock(string type) => All.Contains(type);
 

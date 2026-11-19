@@ -68,7 +68,7 @@ public static class OutputVerifier
                 var srcWs = CellHelper.FindWorksheetPart(source.WorkbookPart!, sheet);
                 var outWs = CellHelper.FindWorksheetPart(output.WorkbookPart!, sheet);
                 if (srcWs == null || outWs == null) continue;
-                CompareDrawings(sheet, srcWs, outWs, movable, problems);
+                CompareDrawings(sheet, srcWs, outWs, movable, PhotoRanges(doc, sheet), problems);
             }
         }
 
@@ -94,6 +94,15 @@ public static class OutputVerifier
            .Where(i => i >= 0)
            .ToHashSet();
 
+    /// <summary>
+    /// 이 시트에 쓰는 사진 구역 블록의 자리들. 그 안의 그림은 그날 장수에 따라 개수·위치가 바뀌는 게 정상이라
+    /// 개수·위치 비교에서 뺀다 (이미지가 파일 안에 있는지는 그대로 검사한다).
+    /// </summary>
+    private static List<string> PhotoRanges(DocumentConfig doc, string sheet) =>
+        doc.Fields.Where(f => f.Type == BlockTypes.Photos
+                           && (string.IsNullOrWhiteSpace(f.Sheet) ? doc.TargetSheets().Contains(sheet) : f.Sheet.Trim() == sheet))
+                  .SelectMany(PhotoAreaWriter.AllRanges).ToList();
+
     private static List<OpenXmlCompositeElement> Anchors(WorksheetPart ws) =>
         ws.DrawingsPart?.WorksheetDrawing?.ChildElements.OfType<OpenXmlCompositeElement>()
           .Where(e => e is Xdr.TwoCellAnchor or Xdr.OneCellAnchor or Xdr.AbsoluteAnchor).ToList()
@@ -108,10 +117,15 @@ public static class OutputVerifier
     }
 
     private static void CompareDrawings(string sheet, WorksheetPart src, WorksheetPart output,
-                                        HashSet<int> movable, List<string> problems)
+                                        HashSet<int> movable, List<string> photoRanges, List<string> problems)
     {
-        var a = Anchors(src);
-        var b = Anchors(output);
+        // 사진 구역 안 그림은 뺀다. movable 은 바탕 파일의 원래 순서 번호라, 남은 그림의 원래 번호도 같이 들고 간다.
+        bool Fixed(OpenXmlCompositeElement x) =>
+            !(x.Descendants<Xdr.Picture>().Any() && PhotoAreaWriter.StartsIn(x, photoRanges));
+        var srcAll = Anchors(src);
+        var keptIndex = srcAll.Select((x, i) => (x, i)).Where(p => Fixed(p.x)).Select(p => p.i).ToList();
+        var a = keptIndex.Select(i => srcAll[i]).ToList();
+        var b = Anchors(output).Where(Fixed).ToList();
         if (a.Count != b.Count)
         {
             problems.Add($"[{sheet}] 그림·도형 개수가 달라졌습니다 ({a.Count}개 → {b.Count}개)");
@@ -124,7 +138,7 @@ public static class OutputVerifier
             problems.Add($"[{sheet}] 그림 개수가 달라졌습니다 ({srcPics}개 → {outPics}개)");
 
         for (int i = 0; i < a.Count; i++)
-            if (!movable.Contains(i) && Position(a[i]) != Position(b[i]))
+            if (!movable.Contains(keptIndex[i]) && Position(a[i]) != Position(b[i]))
                 problems.Add($"[{sheet}] '{ExcelDrawingHelper.ShapeName(b[i]) ?? $"{i + 1}번째 그림"}' 위치가 바뀌었습니다");
 
         // 그림이 가리키는 이미지가 파일 안에 있는지

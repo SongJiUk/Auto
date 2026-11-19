@@ -24,6 +24,18 @@ public class BlockValue
 
     /// <summary>roster: 오늘 나온 사람 (적힌 순서대로 표에 쓴다)</summary>
     public List<RosterEntry> People { get; set; } = [];
+
+    /// <summary>photos: 오늘 넣을 사진과 설명 (칸 순서대로)</summary>
+    public List<PhotoValue> Photos { get; set; } = [];
+}
+
+/// <summary>사진 구역 블록의 사진 한 장</summary>
+public class PhotoValue
+{
+    /// <summary>사진 파일 경로 (비어 있으면 아직 안 고름)</summary>
+    public string Path { get; set; } = "";
+    /// <summary>설명 (예: "일일 TBM(수장재)")</summary>
+    public string Caption { get; set; } = "";
 }
 
 /// <summary>표 블록의 줄 하나</summary>

@@ -311,6 +311,12 @@ public class FieldConfig
     /// </summary>
     public Dictionary<string, List<string>>? RoleMap { get; set; }
 
+    /// <summary>photos: 사진 칸들 (순서대로 채운다). 예) 위 칸 A4:H15 + 설명 B16, 아래 칸 A17:H28 + 설명 B29</summary>
+    public List<PhotoArea>? PhotoAreas { get; set; }
+
+    /// <summary>photos: 사진이 1장인 날 쓸 자리·설명 칸 (예: 두 칸을 합친 A4:H28). 없으면 첫 칸에 넣는다.</summary>
+    public PhotoArea? SinglePhotoArea { get; set; }
+
     // ── 한글(hwpx) 용 ────────────────────────────────────────────────
 
     /// <summary>
@@ -318,6 +324,15 @@ public class FieldConfig
     /// 한글에서 서식의 해당 자리에 이 글자를 적어 두면 생성할 때 값으로 바뀐다.
     /// </summary>
     public string? Placeholder { get; set; }
+}
+
+/// <summary>사진 구역 블록의 사진 자리 하나: 사진이 들어갈 칸 범위 + 그 사진의 설명 칸</summary>
+public class PhotoArea
+{
+    /// <summary>사진 자리 (예: "A4:H15"). 그림이 이 범위를 꽉 채운다.</summary>
+    public string Range { get; set; } = "";
+    /// <summary>설명을 쓸 칸 (예: "B16"). 비어 있으면 설명을 쓰지 않는다.</summary>
+    public string? CaptionCell { get; set; }
 }
 
 /// <summary>표·명단 블록의 열 하나와 그 역할 (BlockTypes.Role* 참고)</summary>

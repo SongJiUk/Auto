@@ -19,8 +19,9 @@ public static class BlockEngine
     // 쓰기
     // ════════════════════════════════════════════════════════════════
 
+    /// <param name="photoLoader">(사진 경로, 너비 px, 높이 px) → JPEG 바이트. 사진 구역 블록에서만 쓴다.</param>
     public static void Write(FieldConfig f, SpreadsheetDocument pkg, WorksheetPart ws, DailyInput input,
-                             string sheet, List<string>? notes)
+                             string sheet, List<string>? notes, Func<string, int, int, byte[]>? photoLoader = null)
     {
         string key = BlockTypes.KeyOf(f);
         var v = input.Block(key);
@@ -64,6 +65,10 @@ public static class BlockEngine
 
             case BlockTypes.Roster:
                 WriteRoster(f, pkg, ws, v.People, sheet, notes);
+                break;
+
+            case BlockTypes.Photos:
+                PhotoAreaWriter.Write(f, pkg, ws, v, sheet, photoLoader, notes);
                 break;
         }
     }
@@ -334,6 +339,9 @@ public static class BlockEngine
                 case BlockTypes.Roster:
                     v.People = ReadRoster(f, ws);
                     break;
+                case BlockTypes.Photos:
+                    v.Photos = PhotoAreaWriter.ReadCaptions(f, ws);
+                    break;
                 default:
                     continue;
             }
@@ -382,6 +390,10 @@ public static class BlockEngine
                     break;
                 case BlockTypes.Roster:
                     v.People = (p?.People ?? []).Select(x => new RosterEntry { Job = x.Job, Person = x.Person, Task = x.Task }).ToList();
+                    break;
+                case BlockTypes.Photos:
+                    // 설명은 어제 것을 그대로, 사진은 매일 새로 고른다
+                    v.Photos = (p?.Photos ?? []).Select(x => new PhotoValue { Caption = x.Caption }).ToList();
                     break;
                 default:
                     continue;
