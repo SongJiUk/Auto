@@ -85,6 +85,7 @@ public static class AppConfigLoader
             AppDomain.CurrentDomain.BaseDirectory,
             "config.json");
 
+        SharedConfig.Stamp(config, Environment.MachineName, DateTime.Now);   // 공유 표시 띠: 누가·언제 저장했는지
         string json = JsonSerializer.Serialize(config, WriteOptions);
         lock (CacheGate)
         {

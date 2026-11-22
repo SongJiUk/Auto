@@ -465,6 +465,17 @@
             </Grid>
         </Border>
 
+        <!-- 공유 표시 띠: 모든 PC 가 같은 설정을 쓰는지 + 다른 PC 에서 바꿨으면 켤 때 한 줄 알림 (코드-비하인드에서 채움) -->
+        <Border x:Name="SharedBar" Background="#EBF8FF" BorderBrush="#BEE3F8" BorderThickness="0,0,0,1" Padding="16,4">
+            <DockPanel>
+                <TextBlock x:Name="SharedNoticeText" DockPanel.Dock="Right" Visibility="Collapsed"
+                           Foreground="#975A16" FontWeight="SemiBold" FontSize="12" Margin="12,0,0,0"
+                           VerticalAlignment="Center"/>
+                <TextBlock x:Name="SharedBarText" Foreground="#2C5282" FontSize="12"
+                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+            </DockPanel>
+        </Border>
+
         <!-- 시작할 때 드라이브 점검에서 중요한 문제가 있으면 보인다. 누르면 구글 드라이브 창 -->
         <Border x:Name="DriveBanner" Visibility="Collapsed" Background="#FEEBC8" BorderBrush="#F6AD55"
                 BorderThickness="0,0,0,1" Padding="16,6" Cursor="Hand" MouseLeftButtonUp="DriveBanner_Click">

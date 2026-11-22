@@ -28,6 +28,9 @@ public partial class MainWindow : Window
                 if (e.PropertyName == nameof(MainViewModel.CurrentStep)) BodyScroll.ScrollToTop();
             };
 
+        // 공유 표시 띠 (다른 PC 에서 설정을 바꿨으면 이번에 켤 때 한 번 알린다)
+        Loaded += (_, _) => RefreshSharedBar(showNotice: true);
+
         // 구글 드라이브 점검은 뒤에서 하고, 중요한 문제가 있을 때만 상단 띠로 알린다
         Loaded += async (_, _) => await CheckDriveAsync();
 
@@ -101,6 +104,42 @@ public partial class MainWindow : Window
         base.OnClosing(e);
     }
 
+    // ── 공유 표시 띠 ─────────────────────────────────────────────────
+
+    /// <summary>
+    /// "☁ 공유 설정 · 폴더 · 마지막 저장 PC·시각" 을 띠에 쓴다. 드라이브 밖이면 ⚠ 주황.
+    /// showNotice 면 지난번에 켠 뒤 다른 PC 가 바꾼 경우 한 줄 알림을 덧붙이고, 본 시각을 이 PC 에 기록한다.
+    /// </summary>
+    private void RefreshSharedBar(bool showNotice)
+    {
+        try
+        {
+            var cfg      = AppConfigLoader.Load();
+            string seen  = SharedConfig.DefaultSeenPath();
+            var status   = SharedConfig.Describe(cfg, AppDomain.CurrentDomain.BaseDirectory,
+                                                 Environment.MachineName, SharedConfig.ReadSeen(seen));
+
+            SharedBarText.Text   = status.Text;
+            SharedBarText.ToolTip = status.Text;
+            SharedBar.Background = status.IsShared ? Brush("#EBF8FF") : Brush("#FEEBC8");
+            SharedBarText.Foreground = status.IsShared ? Brush("#2C5282") : Brush("#7B341E");
+
+            if (showNotice)
+            {
+                SharedNoticeText.Text       = status.Notice ?? "";
+                SharedNoticeText.Visibility = status.Notice == null ? Visibility.Collapsed : Visibility.Visible;
+                if (status.Notice != null) AppLog.Info(status.Notice);
+            }
+            if (cfg.LastSavedAt is { } at) SharedConfig.WriteSeen(seen, at);
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("공유 표시 띠 갱신 실패", ex);
+        }
+    }
+
+    private static SolidColorBrush Brush(string hex) => (SolidColorBrush)new BrushConverter().ConvertFromString(hex)!;
+
     // ── 구글 드라이브 ───────────────────────────────────────────────
 
     private async Task CheckDriveAsync()
@@ -110,7 +149,8 @@ public partial class MainWindow : Window
             var cfg     = AppConfigLoader.Load();
             string bd   = AppDomain.CurrentDomain.BaseDirectory;
             var items   = await Task.Run(() => DriveChecker.Run(cfg, bd));
-            var problem = items.FirstOrDefault(i => i.Important && i.State != CheckState.Ok);
+            // "프로그램 위치(드라이브 밖)"는 공유 표시 띠가 이미 ⚠ 로 보여 주므로 여기서는 뺀다 (같은 경고 두 줄 방지)
+            var problem = items.FirstOrDefault(i => i.Important && i.State != CheckState.Ok && i.Title != "프로그램 위치");
 
             if (problem == null)
             {
@@ -164,6 +204,7 @@ public partial class MainWindow : Window
 
         // 설정에서 문서를 추가·편집했을 수 있으므로 문서 목록과 입력 칸을 다시 읽는다
         (DataContext as MainViewModel)?.ReloadDocuments();
+        RefreshSharedBar(showNotice: false);   // 마지막 저장 시각 갱신 (알림은 켤 때만)
     }
 
     // ── 문서별 입력: 사진 칸 드래그&드롭 ──────────────────────────────

@@ -53,6 +53,12 @@ public class AppConfig
     /// (예: G:\내 드라이브\FormFiller_inbox). exe 기준 상대 경로나 절대 경로를 쓸 수 있다.
     /// </summary>
     public string PhoneInboxFolder { get; set; } = "";
+
+    /// <summary>마지막으로 설정을 저장한 PC 이름 (공유 표시 띠용, AppConfigLoader.Save 가 채운다)</summary>
+    public string LastSavedBy { get; set; } = "";
+
+    /// <summary>마지막으로 설정을 저장한 시각 (이 PC 시각)</summary>
+    public DateTime? LastSavedAt { get; set; }
 }
 
 /// <summary>명단 블록의 사람 한 명</summary>
