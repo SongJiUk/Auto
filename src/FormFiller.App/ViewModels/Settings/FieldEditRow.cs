@@ -15,9 +15,12 @@ public class FieldEditRow
     public string Label => _orig.Label;
 
     /// <summary>"값", "표" 같은 종류 이름. 예전 방식 항목은 [칸 편집]에서 다시 지정하라는 뜻으로 따로 표시.</summary>
-    public string TypeTitle => BlockTypes.IsBlock(_orig.Type) ? BlockTypes.TypeTitle(_orig.Type) : "예전 방식";
+    public string TypeTitle => BlockTypes.IsBlock(_orig.Type) ? BlockTypes.TypeTitle(_orig.Type)
+                             : FieldTypes.IsDailyInput(_orig.Type) ? "사진·측정"
+                             : "예전 방식";
 
-    public bool IsLegacy => !BlockTypes.IsBlock(_orig.Type);
+    /// <summary>블록도 아니고 사진·측정 입력도 아닌 예전 고정 항목 (작업사항·장비표 등)</summary>
+    public bool IsLegacy => !BlockTypes.IsBlock(_orig.Type) && !FieldTypes.IsDailyInput(_orig.Type);
 
     public string CellSummary => BlockTypes.CellSummary(_orig);
 

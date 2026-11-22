@@ -109,6 +109,9 @@ public class DocumentConfig
     /// <summary>이 문서에 채울 필드 목록</summary>
     public List<FieldConfig> Fields { get; set; } = [];
 
+    /// <summary>오늘 작성 화면에서 뺀 예전 입력이 필요한 항목이 있는지 (FieldTypes.NeedsRemovedInput)</summary>
+    public bool HasRemovedInputFields() => Fields.Any(f => FieldTypes.NeedsRemovedInput(f.Type));
+
     /// <summary>
     /// 생성 주기. "daily" | "weekly" | "biweekly" | "monthly" | "custom"
     /// </summary>
@@ -436,4 +439,11 @@ public static class FieldTypes
 
     /// <summary>매일 입력 화면에서 값을 받아야 하는 타입인지</summary>
     public static bool IsDailyInput(string type) => type is Input or Photo or ShapePosition;
+
+    /// <summary>
+    /// 오늘 작성 화면에서 뺀 예전 고정 입력(작업사항·장비·인원·날씨 등)이 있어야 채워지는 종류인지 (2026-11-23).
+    /// 이런 항목이 남은 문서는 [✏ 칸 편집]에서 블록으로 다시 지정해야 한다.
+    /// </summary>
+    public static bool NeedsRemovedInput(string type) =>
+        type is Multiline or EquipmentTable or PersonnelTable or TbmPersonnel or ActiveEquipmentNames or Text;
 }

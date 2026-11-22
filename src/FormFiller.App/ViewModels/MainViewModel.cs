@@ -294,8 +294,7 @@ public partial class MainViewModel : ViewModelBase
     [
         new("docs",   "문서 · 기본 정보"),
         new("blocks", "항목 입력"),
-        new("work",   "작업사항"),
-        new("crew",   "장비 · 인원"),
+        // 예전 "작업사항"·"장비 · 인원" 단계는 뺐다 (2026-11-23 화면 정리). 같은 입력은 블록(항목 입력)으로 한다.
         new("photos", "사진 · 측정값"),
     ];
 
@@ -311,8 +310,6 @@ public partial class MainViewModel : ViewModelBase
             if (value == null || !SetField(ref _currentStep, value)) return;
             OnPropertyChanged(nameof(ShowDocsStep));
             OnPropertyChanged(nameof(ShowBlocksStep));
-            OnPropertyChanged(nameof(ShowWorkStep));
-            OnPropertyChanged(nameof(ShowCrewStep));
             OnPropertyChanged(nameof(ShowPhotosStep));
             OnPropertyChanged(nameof(HasPrevStep));
             OnPropertyChanged(nameof(HasNextStep));
@@ -321,8 +318,6 @@ public partial class MainViewModel : ViewModelBase
 
     public bool ShowDocsStep   => CurrentStep?.Key == "docs";
     public bool ShowBlocksStep => CurrentStep?.Key == "blocks";
-    public bool ShowWorkStep   => CurrentStep?.Key == "work";
-    public bool ShowCrewStep   => CurrentStep?.Key == "crew";
     public bool ShowPhotosStep => CurrentStep?.Key == "photos";
 
     private int CurrentStepIndex => CurrentStep == null ? -1 : VisibleSteps.IndexOf(CurrentStep);
@@ -386,8 +381,6 @@ public partial class MainViewModel : ViewModelBase
         SetField(ref _hasVisibleBlocks, BlockInputs.Any(b => b.IsVisible), nameof(HasVisibleBlocks));
         Step("blocks").IsVisible = _hasVisibleBlocks;
 
-        Step("work").IsVisible   = _usesWork;
-        Step("crew").IsVisible   = _usesEquipment || _usesPersonnel || _usesSujangjae;
         Step("photos").IsVisible = _hasVisibleDocInputs || _hasVisiblePhotoSlots;
 
         int n = 1;
@@ -406,16 +399,6 @@ public partial class MainViewModel : ViewModelBase
         var docs = Step("docs");
         docs.IsDone  = docCount > 0;
         docs.Summary = docCount > 0 ? $"{TargetDate:MM'/'dd (ddd)} · 문서 {docCount}개" : "만들 문서를 고르세요";
-
-        int am = CountFilled(TodayMorningItems), pm = CountFilled(TodayAfternoonItems), tm = CountFilled(TomorrowWorkItems);
-        var work = Step("work");
-        work.IsDone  = am + pm > 0;
-        work.Summary = $"오전 {am} · 오후 {pm} · 명일 {tm}";
-
-        var crew = Step("crew");
-        crew.IsDone  = (!_usesEquipment || TotalTodayEquipment > 0)
-                    && (!_usesPersonnel || TotalTodayPersonnelWithSujangjae > 0);
-        crew.Summary = $"장비 {TotalTodayEquipment}대 · 인원 {TotalTodayPersonnelWithSujangjae}명";
 
         var blocks = BlockInputs.Where(b => b.IsVisible && b is not CalcInputViewModel).ToList();
         var blockStep = Step("blocks");

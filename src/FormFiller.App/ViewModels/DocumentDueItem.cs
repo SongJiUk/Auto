@@ -40,7 +40,7 @@ public class DocumentDueItem : ViewModelBase
     /// <summary>다른 문서와 저장 파일 이름이 같을 때 (서식 없음 경고가 먼저)</summary>
     public void SetDuplicateName(string others)
     {
-        if (!TemplateMissing) Warning = $"저장 파일 이름이 '{others}'와 같아 서로 덮어씁니다 — 설정에서 바꿔 주세요";
+        if (!TemplateMissing) Warning = $"저장 파일 이름이 '{others}'와 같아 서로 덮어씁니다 — 📁 문서 관리에서 바꿔 주세요";
     }
 
     /// <summary>오늘 생성해야 하는지 여부 (주기 계산 결과)</summary>
@@ -74,7 +74,9 @@ public class DocumentDueItem : ViewModelBase
         // 서식 파일이 없으면 만들 수 없으니 처음부터 체크하지 않고 이유를 보여 준다
         TemplateMissing = string.IsNullOrWhiteSpace(config.TemplateFile)
                           || !File.Exists(AppConfigLoader.ResolvePath(config.TemplateFile));
-        if (TemplateMissing) _warning = "서식 파일이 없습니다 — ⚙ 설정에서 다시 골라 주세요";
+        if (TemplateMissing) _warning = "서식 파일이 없습니다 — 📁 문서 관리에서 다시 골라 주세요";
+        else if (config.HasRemovedInputFields())
+            _warning = "예전 방식 칸이 있어 일부가 비어서 만들어집니다 — 📁 문서 관리 → ✏ 칸 편집에서 다시 지정해 주세요";
         _isChecked = IsDue && !TemplateMissing;
 
         FrequencyLabel = DocumentSchedule.Label(config);
