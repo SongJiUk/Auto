@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<style>
+  :root { --blue:#2B6CB0; --line:#E2E8F0; --soft:#F7FAFC; --text:#2D3748; --muted:#718096; --warn:#C05621; --ok:#2F855A; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system, "Malgun Gothic", sans-serif; color:var(--text); background:#EDF2F7; font-size:16px; }
+  header { position:sticky; top:0; z-index:5; background:var(--blue); color:#fff; padding:12px 16px; }
+  header h1 { font-size:18px; margin:0; }
+  header .sub { font-size:12px; opacity:.85; margin-top:2px; }
+  main { padding:12px 12px 120px; max-width:640px; margin:0 auto; }
+  .card { background:#fff; border-radius:10px; padding:12px 14px; margin-bottom:12px; box-shadow:0 1px 2px rgba(0,0,0,.06); }
+  .card h2 { font-size:15px; margin:0 0 8px; }
+  .muted { color:var(--muted); font-size:13px; }
+  .warn { color:var(--warn); font-size:13px; }
+  .row { display:flex; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid var(--line); }
+  .row:last-child { border-bottom:0; }
+  .row .name { flex:1; min-width:0; }
+  .row .name small { display:block; color:var(--muted); font-size:12px; }
+  input[type=text], input[type=number], input[type=date], textarea, select {
+    font:inherit; padding:8px 10px; border:1px solid #CBD5E0; border-radius:8px; width:100%; background:#fff; }
+  input[type=number] { width:72px; text-align:center; }
+  textarea { min-height:88px; }
+  .stepper { display:flex; align-items:center; gap:4px; }
+  .stepper button { width:36px; height:36px; border-radius:8px; border:1px solid #CBD5E0; background:var(--soft); font-size:18px; }
+  label.check { display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--line); }
+  label.check input { width:22px; height:22px; }
+  .add { display:flex; gap:6px; margin-top:8px; }
+  .add button, .btn { border:0; border-radius:8px; padding:9px 12px; background:#EBF8FF; color:var(--blue); font:inherit; font-weight:600; }
+  .photo { display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--line); }
+  .photo img { width:64px; height:64px; object-fit:cover; border-radius:6px; background:var(--soft); }
+  .photo .pick { position:relative; overflow:hidden; }
+  .photo .pick input { position:absolute; inset:0; opacity:0; }
+  footer { position:fixed; left:0; right:0; bottom:0; background:#fff; border-top:1px solid var(--line); padding:10px 12px calc(10px + env(safe-area-inset-bottom)); }
+  footer button { width:100%; max-width:640px; display:block; margin:0 auto; padding:14px; font-size:17px; font-weight:700; border:0; border-radius:10px; background:var(--blue); color:#fff; }
+  footer button:disabled { background:#A0AEC0; }
+  #status { text-align:center; font-size:13px; margin-bottom:6px; }
+  .result.done { color:var(--ok); } .result.failed, .result.partial { color:var(--warn); }
+</style>
+</head>
+<body>
+<header><h1>📱 업무자동화 폰 입력</h1><div class="sub" id="formInfo">불러오는 중…</div></header>
+<main id="app"><div class="card muted">PC 가 만든 입력 양식을 불러오는 중입니다…</div></main>
+<footer><div id="status"></div><button id="send" disabled>올리기</button></footer>
+
+<script>
+var FORM = null, RECENT = [];
+var state = { date: '', docs: {}, blocks: {}, people: {}, newPeople: [], fields: {}, slots: {} };
+var photos = {};   // id → Blob(JPEG)
+
+// ── 작은 도우미 (글자는 늘 textContent 로 넣는다) ─────────────────
+function el(tag, props, kids) {
+  var e = document.createElement(tag);
+  for (var k in (props || {})) {
+    if (k === 'text') e.textContent = props[k];
+    else if (k.indexOf('on') === 0) e.addEventListener(k.slice(2), props[k]);
+    else if (k === 'checked' || k === 'value' || k === 'disabled') e[k] = props[k];
+    else e.setAttribute(k, props[k]);
+  }
+  (kids || []).forEach(function (c) { if (c) e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); });
+  return e;
+}
+function today() { var d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); }
+function deviceName() { return /iPhone|iPad/.test(navigator.userAgent) ? 'iphone' : /Android/.test(navigator.userAgent) ? 'android' : 'phone'; }
+function setStatus(t, cls) { var s = document.getElementById('status'); s.textContent = t || ''; s.className = cls || ''; }
+function fail(e) { setStatus('⚠ ' + (e && e.message ? e.message : e), 'warn'); document.getElementById('send').disabled = false; }
+
+// ── 시작 ────────────────────────────────────────────────────────
+google.script.run.withSuccessHandler(function (json) {
+  var data = JSON.parse(json);
+  FORM = data.form; RECENT = data.recent || [];
+  state.date = today();
+  FORM.docs.forEach(function (d) { state.docs[d.id] = d.due; });
+  FORM.people.forEach(function (p) { state.people[p.name] = p.yesterday; });
+  var at = new Date(FORM.updatedAt);
+  document.getElementById('formInfo').textContent =
+    'PC 양식: ' + (at.getMonth() + 1) + '/' + at.getDate() + ' ' + at.toTimeString().slice(0, 5) + ' (' + FORM.updatedBy + ')';
+  render();
+  document.getElementById('send').disabled = false;
+}).withFailureHandler(function (e) {
+  document.getElementById('app').replaceChildren(el('div', { class: 'card warn', text: '⚠ ' + e.message }));
+}).getForm();
+
+function checkedDocs() { return FORM.docs.filter(function (d) { return state.docs[d.id]; }).map(function (d) { return d.id; }); }
+function usedBy(docIds) { var c = checkedDocs(); return docIds.some(function (id) { return c.indexOf(id) >= 0; }); }
+
+// ── 화면 ────────────────────────────────────────────────────────
+function render() {
+  var app = document.getElementById('app');
+  var cards = [cardDate(), cardDocs()];
+  FORM.blocks.forEach(function (b) { if (usedBy(b.docs)) cards.push(cardBlock(b)); });
+  var fieldDocs = {};
+  FORM.docFields.forEach(function (f) { if (state.docs[f.doc]) (fieldDocs[f.doc + '|' + f.sheet] = fieldDocs[f.doc + '|' + f.sheet] || []).push(f); });
+  Object.keys(fieldDocs).forEach(function (k) { cards.push(cardDocFields(fieldDocs[k])); });
+  var slots = FORM.slots.filter(function (s) { return state.docs[s.doc]; });
+  if (slots.length) cards.push(cardSlots(slots));
+  cards.push(cardRecent());
+  app.replaceChildren.apply(app, cards.filter(Boolean));
+}
+
+function cardDate() {
+  var warn = FORM.date !== state.date
+    ? el('div', { class: 'warn', text: 'PC 양식은 ' + FORM.date + ' 기준입니다 (오늘 PC 가 아직 안 켜졌을 수 있음). 어제 목록이 조금 다를 수 있어요.' }) : null;
+  return el('div', { class: 'card' }, [
+    el('h2', { text: '날짜' }),
+    el('input', { type: 'date', value: state.date, onchange: function (e) { state.date = e.target.value; render(); } }),
+    warn,
+  ]);
+}
+
+function cardDocs() {
+  return el('div', { class: 'card' }, [el('h2', { text: '만들 문서' })].concat(FORM.docs.map(function (d) {
+    return el('label', { class: 'check' }, [
+      el('input', { type: 'checkbox', checked: !!state.docs[d.id], onchange: function (e) { state.docs[d.id] = e.target.checked; render(); } }),
+      el('span', { text: d.name }),
+    ]);
+  })));
+}
+
+function blockState(b) {
+  if (!state.blocks[b.key]) {
+    state.blocks[b.key] = {
+      text: b.text || '', lines: (b.lines || []).join('\n'), today: 0,
+      rows: (b.rows || []).map(function (r) { return { name: r.name, spec: r.spec, today: 0, last: r.lastToday }; }),
+      photos: [],
+    };
+  }
+  return state.blocks[b.key];
+}
+
+function cardBlock(b) {
+  var s = blockState(b), body;
+  if (b.type === 'value') body = [el('input', { type: 'text', value: s.text, oninput: function (e) { s.text = e.target.value; } })];
+  else if (b.type === 'lines') body = [el('textarea', { text: s.lines, oninput: function (e) { s.lines = e.target.value; } }), el('div', { class: 'muted', text: '한 줄에 하나씩' })];
+  else if (b.type === 'counter') body = [stepper(s.today, function (v) { s.today = v; })];
+  else if (b.type === 'table') body = tableBody(b, s);
+  else if (b.type === 'roster') body = rosterBody();
+  else if (b.type === 'photos') body = blockPhotos(b, s);
+  return el('div', { class: 'card' }, [el('h2', { text: b.label })].concat(body || []));
+}
+
+function stepper(value, set) {
+  var input = el('input', { type: 'number', inputmode: 'numeric', min: '0', max: '999', value: value,
+                            oninput: function (e) { set(Math.max(0, Math.min(999, Number(e.target.value) || 0))); } });
+  function bump(d) { var v = Math.max(0, Math.min(999, (Number(input.value) || 0) + d)); input.value = v; set(v); }
+  return el('div', { class: 'stepper' }, [el('button', { type: 'button', text: '−', onclick: function () { bump(-1); } }), input,
+                                          el('button', { type: 'button', text: '+', onclick: function () { bump(1); } })]);
+}
+
+function tableBody(b, s) {
+  if (b.todayFromRoster) return [el('div', { class: 'muted', text: '금일은 명단에서 직종별로 자동으로 셉니다.' })];
+  var rows = s.rows.map(function (r) {
+    return el('div', { class: 'row' }, [
+      el('div', { class: 'name' }, [el('span', { text: r.name }), el('small', { text: (r.spec || '') + (r.last ? ' · 어제 ' + r.last : '') })]),
+      stepper(r.today, function (v) { r.today = v; }),
+    ]);
+  });
+  var name = el('input', { type: 'text', placeholder: '이름 (예: B/H 06W)' });
+  var spec = el('input', { type: 'text', placeholder: '규격' });
+  var same = el('button', { type: 'button', class: 'btn', text: '↻ 어제와 같게', onclick: function () {
+    s.rows.forEach(function (r) { r.today = r.last || 0; }); render(); } });
+  return rows.concat([
+    el('div', { class: 'add' }, [name, spec, el('button', { type: 'button', text: '+ 추가', onclick: function () {
+      if (!name.value.trim()) return; s.rows.push({ name: name.value.trim(), spec: spec.value.trim(), today: 1, last: 0 }); render(); } })]),
+    el('div', { class: 'add' }, [same]),
+  ]);
+}
+
+function rosterBody() {
+  var list = FORM.people.concat(state.newPeople);
+  var rows = list.map(function (p) {
+    return el('label', { class: 'check' }, [
+      el('input', { type: 'checkbox', checked: !!state.people[p.name], onchange: function (e) { state.people[p.name] = e.target.checked; } }),
+      el('span', { class: 'name' }, [el('span', { text: p.name }), el('small', { text: p.job || '' })]),
+    ]);
+  });
+  var name = el('input', { type: 'text', placeholder: '이름' });
+  var job = el('input', { type: 'text', placeholder: '직종' });
+  return [el('div', { class: 'muted', text: '오늘 나온 사람에 체크 (어제 온 사람은 미리 체크됨)' })].concat(rows, [
+    el('div', { class: 'add' }, [name, job, el('button', { type: 'button', text: '+ 사람', onclick: function () {
+      var n = name.value.trim(); if (!n) return;
+      state.newPeople.push({ name: n, job: job.value.trim(), task: '' }); state.people[n] = true; render(); } })]),
+  ]);
+}
+
+function photoRow(id, label, extra) {
+  var img = el('img', { alt: '' });
+  if (photos[id]) img.src = URL.createObjectURL(photos[id]);
+  var input = el('input', { type: 'file', accept: 'image/*', onchange: function (e) {
+    var f = e.target.files[0]; if (!f) return;
+    shrink(f).then(function (blob) { photos[id] = blob; img.src = URL.createObjectURL(blob); }).catch(fail);
+  } });
+  var clear = el('button', { type: 'button', class: 'btn', text: '✕', onclick: function () { delete photos[id]; img.removeAttribute('src'); } });
+  return el('div', { class: 'photo' }, [img, el('div', { class: 'name' }, [el('div', { text: label })].concat(extra || [])),
+                                        el('span', { class: 'btn pick', text: '📷' }, [input]), clear]);
+}
+
+function blockPhotos(b, s) {
+  var n = Math.max(1, b.photoCount || 1), list = [];
+  for (var i = 0; i < n; i++) (function (i) {
+    s.photos[i] = s.photos[i] || { caption: '' };
+    list.push(photoRow('b:' + b.key + ':' + i, (i + 1) + '번 사진', [
+      el('input', { type: 'text', placeholder: '설명 (선택)', value: s.photos[i].caption, oninput: function (e) { s.photos[i].caption = e.target.value; } })]));
+  })(i);
+  return list;
+}
+
+function cardDocFields(fields) {
+  var title = fields[0].docName + (fields[0].sheet ? ' · ' + fields[0].sheet : '');
+  return el('div', { class: 'card' }, [el('h2', { text: title })].concat(fields.map(function (f) {
+    var key = f.doc + '|' + f.sheet + '|' + f.field;
+    var st = state.fields[key] = state.fields[key] || { value: '' };
+    var value = f.hasValue ? el('input', { type: 'text', inputmode: 'decimal', placeholder: '값' + (f.unit ? ' (' + f.unit + ')' : ''),
+                                         value: st.value, oninput: function (e) { st.value = e.target.value; } }) : null;
+    if (f.kind === 'photo') return photoRow('f:' + key, f.label, [value]);
+    if (f.kind === 'shape') return el('div', { class: 'row' }, [el('div', { class: 'name', text: f.label }),
+      el('select', { onchange: function (e) { st.value = e.target.value; } },
+         [el('option', { value: '', text: '(그대로)' })].concat(f.options.map(function (o) { return el('option', { value: o, text: o }); })))]);
+    return el('div', { class: 'row' }, [el('div', { class: 'name', text: f.label }), value]);
+  })));
+}
+
+function cardSlots(slots) {
+  return el('div', { class: 'card' }, [el('h2', { text: '사진대지' })].concat(slots.map(function (s) {
+    return photoRow('s:' + s.doc + '|' + s.sheet + '|' + s.index, s.docName + ' · ' + s.label);
+  })));
+}
+
+function cardRecent() {
+  if (!RECENT.length) return null;
+  return el('div', { class: 'card' }, [el('h2', { text: '최근 올린 것' })].concat(RECENT.map(function (r) {
+    var res = r.result, t = !res ? '⏳ PC 처리 대기' : res.status === 'done' ? '✅ ' + res.files.join(', ')
+          : (res.status === 'partial' ? '⚠ 일부만: ' : '⚠ 실패: ') + (res.messages[0] || '');
+    return el('div', { class: 'row' }, [el('div', { class: 'name' }, [el('span', { text: r.name.slice(0, 10) + ' ' + r.name.slice(11, 13) + ':' + r.name.slice(13, 15) }),
+                                                                    el('small', { class: 'result ' + (res ? res.status : ''), text: t })])]);
+  })));
+}
+
+// ── 사진 줄이기 (긴 변 1600px JPEG) ─────────────────────────────
+function shrink(file) {
+  return new Promise(function (ok, no) {
+    var img = new Image();
+    img.onload = function () {
+      var max = 1600, w = img.naturalWidth, h = img.naturalHeight, r = Math.min(1, max / Math.max(w, h));
+      var c = document.createElement('canvas'); c.width = Math.round(w * r); c.height = Math.round(h * r);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      c.toBlob(function (b) { b ? ok(b) : no(new Error('사진을 줄이지 못했습니다')); }, 'image/jpeg', 0.82);
+    };
+    img.onerror = function () { no(new Error('사진을 열지 못했습니다')); };
+    img.src = URL.createObjectURL(file);
+  });
+}
+function toBase64(blob) {
+  return new Promise(function (ok) { var r = new FileReader(); r.onload = function () { ok(String(r.result).split(',')[1]); }; r.readAsDataURL(blob); });
+}
+function call(fn) {
+  var args = Array.prototype.slice.call(arguments, 1);
+  return new Promise(function (ok, no) { var r = google.script.run.withSuccessHandler(ok).withFailureHandler(no); r[fn].apply(r, args); });
+}
+
+// ── 올리기 ──────────────────────────────────────────────────────
+function buildInput(photoNames) {
+  var blocks = [];
+  FORM.blocks.forEach(function (b) {
+    if (!usedBy(b.docs)) return;
+    var s = blockState(b), out = { key: b.key };
+    if (b.type === 'value') out.text = s.text;
+    if (b.type === 'lines') out.lines = s.lines.split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
+    if (b.type === 'counter') out.today = s.today;
+    if (b.type === 'table' && !b.todayFromRoster) out.rows = s.rows.map(function (r) { return { name: r.name, spec: r.spec, today: r.today }; });
+    if (b.type === 'roster') out.people = FORM.people.concat(state.newPeople).filter(function (p) { return state.people[p.name]; })
+                                           .map(function (p) { return { person: p.name, job: p.job || '', task: p.task || '' }; });
+    if (b.type === 'photos') out.photos = s.photos.map(function (p, i) { return { file: photoNames['b:' + b.key + ':' + i], caption: p.caption }; })
+                                           .filter(function (p) { return p.file; });
+    blocks.push(out);
+  });
+  var docFields = FORM.docFields.filter(function (f) { return state.docs[f.doc]; }).map(function (f) {
+    var key = f.doc + '|' + f.sheet + '|' + f.field, st = state.fields[key] || { value: '' };
+    return { doc: f.doc, sheet: f.sheet, field: f.field, value: st.value || '', photo: photoNames['f:' + key] || null };
+  }).filter(function (d) { return d.value || d.photo; });
+  var slots = FORM.slots.filter(function (s) { return state.docs[s.doc]; }).map(function (s) {
+    return { doc: s.doc, sheet: s.sheet, index: s.index, photo: photoNames['s:' + s.doc + '|' + s.sheet + '|' + s.index] };
+  }).filter(function (s) { return s.photo; });
+  return { schemaVersion: 2, date: state.date, device: deviceName(), docs: checkedDocs(), blocks: blocks, docFields: docFields, slots: slots };
+}
+
+document.getElementById('send').addEventListener('click', function () {
+  if (!checkedDocs().length) { setStatus('만들 문서를 하나 이상 고르세요', 'warn'); return; }
+  var btn = this; btn.disabled = true;
+  var ids = Object.keys(photos), names = {}, folder;
+  ids.forEach(function (id, i) { names[id] = 'p' + (i + 1) + '.jpg'; });
+  setStatus('올리는 중…');
+  call('startSubmission', state.date, deviceName()).then(function (f) {
+    folder = f;
+    return ids.reduce(function (p, id, i) {
+      return p.then(function () { setStatus('사진 올리는 중 ' + (i + 1) + '/' + ids.length);
+        return toBase64(photos[id]).then(function (b64) { return call('uploadPhoto', folder, names[id], b64); }); });
+    }, Promise.resolve());
+  }).then(function () {
+    return call('finishSubmission', folder, JSON.stringify(buildInput(names)));
+  }).then(function () {
+    setStatus('✅ 올렸습니다. PC 가 1~2분 안에 만듭니다…');
+    btn.disabled = false;
+    waitResult(folder, 0);
+  }).catch(fail);
+});
+
+function waitResult(folder, n) {
+  if (n > 20) { setStatus('PC 가 아직 만들지 않았습니다. 회사 PC 가 켜져 있고 업무자동화가 실행 중인지 확인하세요.', 'warn'); return; }
+  setTimeout(function () {
+    call('getResult', folder).then(function (json) {
+      var r = JSON.parse(json);
+      if (!r) { setStatus('⏳ PC 처리 대기 중… (' + (n + 1) + ')'); waitResult(folder, n + 1); return; }
+      if (r.status === 'done') setStatus('✅ 만들었습니다: ' + r.files.join(', '), 'result done');
+      else setStatus('⚠ ' + (r.messages[0] || '만들지 못했습니다'), 'warn');
+    }).catch(fail);
+  }, 20000);
+}
+</script>
+</body>
+</html>

@@ -17,6 +17,8 @@ namespace FormFiller.App;
 /// </summary>
 public partial class MainWindow : Window
 {
+    private readonly PhoneWatcher _phoneWatcher;
+
     public MainWindow()
     {
         InitializeComponent();
@@ -30,6 +32,15 @@ public partial class MainWindow : Window
 
         // 공유 표시 띠 (다른 PC 에서 설정을 바꿨으면 이번에 켤 때 한 번 알린다)
         Loaded += (_, _) => RefreshSharedBar(showNotice: true);
+
+        // 폰 입력 자동 생성: 켜 둔 동안 1분마다 확인 (결과는 띠 오른쪽에 한 줄)
+        _phoneWatcher = new PhoneWatcher(line =>
+        {
+            SharedNoticeText.Text       = line;
+            SharedNoticeText.Visibility = Visibility.Visible;
+            AppLog.Info(line);
+        });
+        Loaded += (_, _) => _phoneWatcher.Start();
 
         // 구글 드라이브 점검은 뒤에서 하고, 중요한 문제가 있을 때만 상단 띠로 알린다
         Loaded += async (_, _) => await CheckDriveAsync();
@@ -205,6 +216,7 @@ public partial class MainWindow : Window
         // 설정에서 문서를 추가·편집했을 수 있으므로 문서 목록과 입력 칸을 다시 읽는다
         (DataContext as MainViewModel)?.ReloadDocuments();
         RefreshSharedBar(showNotice: false);   // 마지막 저장 시각 갱신 (알림은 켤 때만)
+        _phoneWatcher.InvalidateForm();        // 폰 화면 양식도 새 설정으로
     }
 
     // ── 문서별 입력: 사진 칸 드래그&드롭 ──────────────────────────────
