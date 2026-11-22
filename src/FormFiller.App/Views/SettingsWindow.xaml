@@ -314,7 +314,7 @@
                                                TextTrimming="CharacterEllipsis"/>
 
                                     <!-- 타입 (회색 소문자) -->
-                                    <TextBlock Grid.Column="1" Text="{Binding Type}"
+                                    <TextBlock Grid.Column="1" Text="{Binding TypeTitle}"
                                                Foreground="#A0AEC0" FontSize="10"
                                                VerticalAlignment="Center"/>
 
@@ -325,6 +325,14 @@
                                              Style="{StaticResource CellBox}"
                                              HorizontalAlignment="Left"
                                              Margin="6,0"/>
+
+                                    <!-- ─ 블록(여러 줄·표·사진 등) : 칸 요약만, 바꾸기는 [Excel 에서 편집] ─ -->
+                                    <TextBlock Grid.Column="2"
+                                               Visibility="{Binding IsBlockSummary, Converter={StaticResource BoolVis}}"
+                                               Text="{Binding CellSummary}"
+                                               Foreground="#4A5568" FontSize="12" VerticalAlignment="Center"
+                                               Margin="10,0"
+                                               ToolTip="칸을 바꾸려면 위의 [Excel 에서 편집] 을 누르세요."/>
 
                                     <!-- ─ 테이블 : 행·열 설정 ─ -->
                                     <WrapPanel Grid.Column="2"

@@ -23,7 +23,15 @@ public class FieldEditRow : ViewModelBase
     public bool IsTableType   => Type is FieldTypes.EquipmentTable or FieldTypes.PersonnelTable;
     public bool IsEquipTable  => Type == FieldTypes.EquipmentTable;
     public bool IsPersonTable => Type == FieldTypes.PersonnelTable;
-    public bool IsSimpleType  => !IsTableType;
+    public bool IsSimpleType  => !IsTableType && !IsBlockSummary;
+
+    /// <summary>
+    /// 칸 주소 하나로 못 나타내는 블록(여러 줄·표·명단·사진 등): 주소 입력칸 대신 칸 요약만 보여 준다.
+    /// 칸을 바꾸는 곳은 [Excel 에서 편집] (여기서 주소를 고쳐도 저장되지 않던 칸이었음, 2026-11-22).
+    /// </summary>
+    public bool IsBlockSummary => BlockTypes.IsBlock(Type) && string.IsNullOrWhiteSpace(_orig.Cell);
+    public string CellSummary  => BlockTypes.CellSummary(_orig);
+    public string TypeTitle    => BlockTypes.TypeTitle(Type);
 
     // ── 단순 셀 / 멀티라인 시작 셀 주소 ─────────────────────────────
 

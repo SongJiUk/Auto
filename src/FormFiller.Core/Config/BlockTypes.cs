@@ -35,6 +35,32 @@ public static class BlockTypes
 
     public static bool IsBlock(string type) => All.Contains(type);
 
+    /// <summary>설정 화면에 보일 종류 이름. 블록이 아니면(예전 항목) 그대로.</summary>
+    public static string TypeTitle(string type) => type switch
+    {
+        Value   => "값",
+        Date    => "날짜",
+        Lines   => "여러 줄",
+        Counter => "누계",
+        Table   => "표",
+        Roster  => "명단",
+        Calc    => "합계·모음",
+        Photos  => "사진",
+        Formula => "계산식",
+        _       => type,
+    };
+
+    /// <summary>블록이 쓰는 칸 요약 (설정 화면 읽기 전용 표시용). 예: "B10 ~ B12 (3칸)", "20 ~ 32행"</summary>
+    public static string CellSummary(FieldConfig f)
+    {
+        if (f.Cells is { Count: > 0 } cells)
+            return cells.Count == 1 ? cells[0] : $"{cells[0]} ~ {cells[^1]} ({cells.Count}칸)";
+        if (f.StartRow > 0) return $"{f.StartRow} ~ {f.EndRow}행";
+        if (f.PhotoAreas is { Count: > 0 } areas) return $"사진 칸 {areas.Count}개";
+        if (!string.IsNullOrWhiteSpace(f.Cell)) return f.Cell;
+        return "칸 없음 (입력만)";
+    }
+
     /// <summary>블록의 값 이름 (Key 가 비어 있으면 Label)</summary>
     public static string KeyOf(FieldConfig f) => string.IsNullOrWhiteSpace(f.Key) ? f.Label.Trim() : f.Key.Trim();
 
