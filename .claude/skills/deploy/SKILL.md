@@ -1,6 +1,6 @@
 ---
 name: deploy
-description: 서식채우기(FormFiller) 프로그램을 빌드·테스트하고 GitHub에 push한 뒤, 사용자가 실제로 쓰는 구글 드라이브 폴더(G:\내 드라이브\FormFiller\)의 exe를 새 것으로 바꾼다. "배포", "드라이브에 올려줘", "새 exe로 바꿔줘", "/deploy" 요청 때 사용.
+description: 서식채우기(FormFiller) 프로그램을 빌드·테스트하고 GitHub에 push한 뒤, 사용자가 실제로 쓰는 구글 드라이브 폴더(G:\내 드라이브\업무자동화\)의 exe를 새 것으로 바꾼다. "배포", "드라이브에 올려줘", "새 exe로 바꿔줘", "/deploy" 요청 때 사용.
 ---
 
 # 배포 (빌드 → 테스트 → push → 드라이브 exe 교체)
@@ -13,7 +13,7 @@ exe 는 드라이브에만 복사한다. 바탕화면에는 복사하지 않는�
 ## 고정 정보
 | 항목 | 값 |
 |---|---|
-| 실행 폴더 | `G:\내 드라이브\FormFiller\` (exe + `config.json` + `서식\` + `output\` + `logs\`) |
+| 실행 폴더 | `G:\내 드라이브\업무자동화\` (exe + `config.json` + `서식\` + `output\` + `logs\`) |
 | exe 이름 | `src\FormFiller.App\FormFiller.App.csproj` 의 `<AssemblyName>` + `.exe` — **매번 csproj에서 읽는다** (2026-11-18 기준 `업무자동화`) |
 | 절대 건드리지 않는 것 | 드라이브의 `config.json`, `config*백업*.json`, `서식\`, `output\`, `logs\` |
 
@@ -45,8 +45,8 @@ dotnet publish src/FormFiller.App/FormFiller.App.csproj -c Release -r win-x64 --
    Get-Process -Name '업무자동화','FormFiller.App' -ErrorAction SilentlyContinue | Select-Object Name, Id, Path
    ```
    - 드라이브 경로의 프로세스가 있으면 **종료하지 말고** 사용자에게 프로그램을 닫아 달라고 한다. 다른 PC(회사/집)에서 실행 중일 수도 있다고 알린다.
-2. 기존 exe를 백업한다: `G:\내 드라이브\FormFiller\<이름>_이전.exe` (덮어써도 되는 한 개만 유지).
-3. `publish\<AssemblyName>.exe` → `G:\내 드라이브\FormFiller\` 복사.
+2. 기존 exe를 백업한다: `G:\내 드라이브\업무자동화\<이름>_이전.exe` (덮어써도 되는 한 개만 유지).
+3. `publish\<AssemblyName>.exe` → `G:\내 드라이브\업무자동화\` 복사.
 4. 복사 후 두 파일의 SHA256이 같은지 확인한다 (`Get-FileHash`).
 
 ### exe 이름이 드라이브와 다를 때 (예: 드라이브에는 `FormFiller.App.exe`, 새 것은 `업무자동화.exe`)

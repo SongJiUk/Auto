@@ -18,7 +18,7 @@ CLAUDE.md "검증 규칙"을 절차로 만든 것이다. **파일은 읽기만 �
 | `UsePreviousAsBase` 켜진 문서 | 앞 날짜 출력 파일 (없으면 서식) |
 | 그 외 | `config.json` 의 `templateFile` 서식 |
 
-실사용 위치: 서식 `G:\내 드라이브\FormFiller\서식\`, 결과 `G:\내 드라이브\FormFiller\output\`. 개발 중에는 `samples\` → `output\`.
+실사용 위치: 서식 `G:\내 드라이브\업무자동화\서식\`, 결과 `G:\내 드라이브\업무자동화\output\`. 개발 중에는 `samples\` → `output\`.
 
 ## 2. 구조 비교 (자동)
 ```powershell
