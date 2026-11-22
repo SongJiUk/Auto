@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using FormFiller.Core.Config;
 using FormFiller.Core.Excel;
 using FormFiller.Tests.Helpers;
@@ -74,6 +74,34 @@ public class HeaderDetectorTests : IDisposable
     {
         var cols = HeaderDetector.Detect(BlockTypes.Table, 5, 1, 6, Sheet(new SheetSpec("S") { ["A5"] = "x" }));
         cols.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void 금일_열이_없으면_전일_열이_매일_입력_칸()
+    {
+        // 폐기물 반출: 구분 · 규격 · 전일반출(대) · 누계(대) · 총 반출수량 — 금일 열이 없다.
+        // 사용자 규칙 (2026-11-22): 누계 = 어제 누계 + 오늘 적는 전일반출 → 전일반출은 "금일"(매일 입력) 역할
+        var spec = new SheetSpec("S")
+        {
+            ["A34"] = "구분", ["C34"] = "규격", ["E34"] = "전일반출(대)", ["G34"] = "누계(대)", ["I34"] = "총 반출수량",
+            ["A35"] = "덤프",
+        };
+        var cols = HeaderDetector.Detect(BlockTypes.Table, 35, 1, 10, Sheet(spec));
+        cols.Should().BeEquivalentTo(new Dictionary<string, string>
+            { ["name"] = "A", ["spec"] = "C", ["today"] = "E", ["total"] = "G" });
+    }
+
+    [Fact]
+    public void 철거_전일철거동_누계동도_같은_규칙()
+    {
+        var spec = new SheetSpec("S")
+        {
+            ["L35"] = "공종", ["N35"] = "총건물동수", ["P35"] = "전일철거동", ["R35"] = "누계동", ["T35"] = "잔여동", ["V35"] = "공정율",
+            ["L36"] = "철거동",
+        };
+        var cols = HeaderDetector.Detect(BlockTypes.Table, 36, 12, 23, Sheet(spec));
+        cols.Should().BeEquivalentTo(new Dictionary<string, string>
+            { ["name"] = "L", ["today"] = "P", ["total"] = "R" });
     }
 
     [Fact]

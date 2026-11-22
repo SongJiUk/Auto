@@ -35,7 +35,19 @@ public static class HeaderDetector
             }
             if (found.Count >= 2) { best = found; break; }
         }
+        if (best != null && kind == BlockTypes.Table) TreatPrevAsTodayWhenNoToday(best);
         return best ?? [];
+    }
+
+    /// <summary>
+    /// 금일 열 없이 전일·누계만 있는 표 (폐기물 "전일반출 · 누계", 철거 "전일철거동 · 누계동"):
+    /// 전일 칸이 매일 적는 칸이고 누계 = 어제 누계 + 그 값 → 전일 열을 금일 역할로 바꾼다 (2026-11-22 사용자 규칙).
+    /// </summary>
+    private static void TreatPrevAsTodayWhenNoToday(Dictionary<string, string> found)
+    {
+        if (found.ContainsKey(BlockTypes.RoleToday) || !found.ContainsKey(BlockTypes.RoleTotal)) return;
+        if (!found.Remove(BlockTypes.RolePrev, out string? col)) return;
+        found[BlockTypes.RoleToday] = col;
     }
 
     /// <summary>머리글 글자 하나의 역할. 모르면 null.</summary>

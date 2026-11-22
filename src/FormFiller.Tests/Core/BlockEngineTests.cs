@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using FormFiller.Core.Config;
 using FormFiller.Core.Excel;
 using FormFiller.Core.Models;
@@ -237,6 +237,26 @@ public class BlockEngineTests : IDisposable
         var init = BlockEngine.InitialValues(doc, BlockEngine.ReadValues(_dir.File("t.xlsx"), doc));
         init["장비"].Rows.Select(r => (r.Name, r.Spec, r.Prev, r.Today, r.LastToday))
             .Should().Equal(("B/H 380", "39.6t", 37m, 0m, 1m), ("덤프", "15m3", 7m, 0m, 2m));
+    }
+
+    [Fact]
+    public void 표_금일열_없이_전일반출과_누계만_있으면_어제누계에_더한다()
+    {
+        // 폐기물·철거: 전일반출(E)을 매일 적고, 누계(G) = 어제 누계 + 전일반출 (2026-11-22 사용자 규칙)
+        XlsxBuilder.Create(_dir.File("w.xlsx"), new SheetSpec(Sheet) { ["A35"] = "덤프", ["C35"] = "15m3", ["E35"] = 0, ["G35"] = 60 });
+        var cols = new List<ColumnRole>
+        {
+            new() { Role = BlockTypes.RoleName, Col = "A" }, new() { Role = BlockTypes.RoleSpec, Col = "C" },
+            new() { Role = BlockTypes.RoleToday, Col = "E" }, new() { Role = BlockTypes.RoleTotal, Col = "G" },
+        };
+        var doc = Doc("w.xlsx", Block(BlockTypes.Table, "폐기물", f => { f.StartRow = 35; f.EndRow = 36; f.Columns = cols; }));
+
+        Day(doc, Mon, i => i.Blocks["폐기물"].Rows[0].Today = 2);
+        var (tue, _) = Day(doc, Tue, i => i.Blocks["폐기물"].Rows[0].Today = 3);
+
+        using var r = Open(tue);
+        r.Int(Sheet, "E35").Should().Be(3, "그날 적은 전일반출");
+        r.Int(Sheet, "G35").Should().Be(65, "60 + 2 + 3");
     }
 
     // ── roster + 명단으로 인원 세기 ──────────────────────────────────
