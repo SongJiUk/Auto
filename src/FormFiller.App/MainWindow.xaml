@@ -428,7 +428,7 @@
 
                 <!-- 설정 버튼 -->
                 <Button Grid.Column="3"
-                        Content="⚙ 설정"
+                        Content="📁 문서 관리"
                         Click="OpenSettings_Click"
                         Background="Transparent" Foreground="White"
                         BorderThickness="1" BorderBrush="#BEE3F8"

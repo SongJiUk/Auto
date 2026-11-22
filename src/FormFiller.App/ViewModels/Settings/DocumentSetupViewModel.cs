@@ -1147,18 +1147,8 @@ public class DocumentSetupViewModel : ViewModelBase, ISetupHost
         try
         {
             var doc = BuildDocument("test", _filePath);
-            if (!doc.OutputPattern.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase))
-                doc.OutputPattern = Path.ChangeExtension(doc.OutputPattern, ".xlsx");
-            doc.UsePreviousAsBase = false;   // 늘 서식에서 새로
-
-            string folder = Path.Combine(Path.GetTempPath(), "FormFiller_시험", DateTime.Now.ToString("yyyyMMdd_HHmmss"));
-            var input = new FormFiller.Core.Models.DailyInput
-            {
-                Date   = DateTime.Today,
-                Blocks = BlockEngine.InitialValues(doc, BlockEngine.ReadValues(_filePath, doc)),
-            };
             var notes = new List<string>();
-            string path = GenericExcelWriter.Generate(input, doc, "", folder, notes: notes);
+            string path = TrialGenerator.Generate(doc, _filePath, TrialGenerator.NewTempFolder(), DateTime.Today, notes);
 
             string msg = $"시험 파일을 만들었습니다 (저장하지 않음, 임시 폴더).\n{path}\n\n" +
                          "입력 칸은 서식에 적힌 글자를 그대로 넣었습니다. 칸 위치·날짜 형식·식 결과를 확인하세요.";

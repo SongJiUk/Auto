@@ -3,194 +3,29 @@ using FormFiller.Core.Config;
 namespace FormFiller.App.ViewModels.Settings;
 
 /// <summary>
-/// 설정 화면에서 한 필드(FieldConfig)를 편집하는 행 모델.
-///
-/// 필드 타입에 따라 세 가지 UI 그룹이 있다:
-///   - 단순 셀 (IsSimpleType=true) : 항목명 | 셀 주소
-///   - 멀티라인 (IsMultiline=true) : 항목명 | 시작 셀 주소
-///   - 테이블   (IsTableType=true) : 항목명 | 시작행·끝행·열 설정
+/// 문서 관리 화면에서 한 항목(FieldConfig)을 보여 주는 읽기 전용 행.
+/// 칸·규칙을 바꾸는 곳은 [✏ 칸 편집] 하나뿐이라 여기서는 이름·종류·칸 요약만 보여 준다 (2026-11-22 화면 정리).
 /// </summary>
-public class FieldEditRow : ViewModelBase
+public class FieldEditRow
 {
-    // ── 불변 정보 ────────────────────────────────────────────────────
-
-    public string FieldId { get; }
-    public string Label   { get; }
-    public string Type    { get; }
-
-    // ── 타입 판별 (Visibility 바인딩용) ──────────────────────────────
-
-    public bool IsTableType   => Type is FieldTypes.EquipmentTable or FieldTypes.PersonnelTable;
-    public bool IsEquipTable  => Type == FieldTypes.EquipmentTable;
-    public bool IsPersonTable => Type == FieldTypes.PersonnelTable;
-    public bool IsSimpleType  => !IsTableType && !IsBlockSummary;
-
-    /// <summary>
-    /// 칸 주소 하나로 못 나타내는 블록(여러 줄·표·명단·사진 등): 주소 입력칸 대신 칸 요약만 보여 준다.
-    /// 칸을 바꾸는 곳은 [Excel 에서 편집] (여기서 주소를 고쳐도 저장되지 않던 칸이었음, 2026-11-22).
-    /// </summary>
-    public bool IsBlockSummary => BlockTypes.IsBlock(Type) && string.IsNullOrWhiteSpace(_orig.Cell);
-    public string CellSummary  => BlockTypes.CellSummary(_orig);
-    public string TypeTitle    => BlockTypes.TypeTitle(Type);
-
-    // ── 단순 셀 / 멀티라인 시작 셀 주소 ─────────────────────────────
-
-    private string _cellAddress = "";
-
-    /// <summary>
-    /// 단순 셀이면 해당 셀 주소 (예: "C6"),
-    /// 멀티라인이면 시작 셀 주소 (예: "A9").
-    /// </summary>
-    public string CellAddress
-    {
-        get => _cellAddress;
-        set => SetField(ref _cellAddress, value);
-    }
-
-    // ── 테이블 공통 ──────────────────────────────────────────────────
-
-    private int _startRow;
-    public int StartRow { get => _startRow; set => SetField(ref _startRow, value); }
-
-    private int _endRow;
-    public int EndRow { get => _endRow; set => SetField(ref _endRow, value); }
-
-    private string _todayCol = "";
-    public string TodayCol { get => _todayCol; set => SetField(ref _todayCol, value); }
-
-    // ── equipment_table 전용 ─────────────────────────────────────────
-
-    private string _nameCol = "";
-    public string NameCol { get => _nameCol; set => SetField(ref _nameCol, value); }
-
-    private string _prevDayCol = "";
-    public string PrevDayCol { get => _prevDayCol; set => SetField(ref _prevDayCol, value); }
-
-    // ── personnel_table 전용 ─────────────────────────────────────────
-
-    private string _roleCol = "";
-    public string RoleCol { get => _roleCol; set => SetField(ref _roleCol, value); }
-
-    private string _prevCumulativeCol = "";
-    public string PrevCumulativeCol { get => _prevCumulativeCol; set => SetField(ref _prevCumulativeCol, value); }
-
-    // ── 생성자 ──────────────────────────────────────────────────────
-
-    /// <summary>불러온 원본 (사진·위치·단위 등 이 화면에서 다루지 않는 값을 보존)</summary>
     private readonly FieldConfig _orig;
 
-    public FieldEditRow(FieldConfig f)
-    {
-        _orig   = f;
-        FieldId = f.Id;
-        Label   = f.Label;
-        Type    = f.Type;
+    public FieldEditRow(FieldConfig f) => _orig = f;
 
-        // 멀티라인은 Cells의 첫 번째 주소를 시작 셀로 사용
-        _cellAddress = (f.Type == FieldTypes.Multiline)
-            ? f.Cells?.FirstOrDefault() ?? ""
-            : f.Cell ?? "";
+    public string Label => _orig.Label;
 
-        _startRow          = f.StartRow;
-        _endRow            = f.EndRow;
-        _nameCol           = f.NameCol           ?? "";
-        _prevDayCol        = f.PrevDayCol        ?? "";
-        _todayCol          = f.TodayCol          ?? "";
-        _roleCol           = f.RoleCol           ?? "";
-        _prevCumulativeCol = f.PrevCumulativeCol ?? "";
-    }
+    /// <summary>"값", "표" 같은 종류 이름. 예전 방식 항목은 [칸 편집]에서 다시 지정하라는 뜻으로 따로 표시.</summary>
+    public string TypeTitle => BlockTypes.IsBlock(_orig.Type) ? BlockTypes.TypeTitle(_orig.Type) : "예전 방식";
 
-    // ── 변환 ─────────────────────────────────────────────────────────
+    public bool IsLegacy => !BlockTypes.IsBlock(_orig.Type);
 
-    /// <summary>현재 편집 상태를 FieldConfig로 변환한다.</summary>
-    public FieldConfig ToFieldConfig()
-    {
-        // 블록은 이 화면에서 이름·칸 주소만 고친다. 나머지 규칙(값 이름·열 역할·계산 등)은 원본 그대로 복사한다.
-        if (BlockTypes.IsBlock(Type))
-        {
-            var copy = System.Text.Json.JsonSerializer.Deserialize<FieldConfig>(
-                           System.Text.Json.JsonSerializer.Serialize(_orig))!;
-            copy.Label = Label;
-            if (!string.IsNullOrWhiteSpace(_orig.Cell) && !string.IsNullOrWhiteSpace(_cellAddress)) copy.Cell = _cellAddress;
-            return copy;
-        }
+    public string CellSummary => BlockTypes.CellSummary(_orig);
 
-        var fc = BuildFieldConfig();
-        // 이 화면에서 편집하지 않는 값은 원본 그대로 보존
-        fc.Suffix      = _orig.Suffix;
-        fc.ValueCell   = _orig.ValueCell;
-        fc.Time        = _orig.Time;
-        fc.ShapeNames  = _orig.ShapeNames;
-        fc.Presets     = _orig.Presets;
-        fc.Placeholder = _orig.Placeholder;
-        fc.SpecCol     = _orig.SpecCol;
-        fc.Sheet       = _orig.Sheet;
-        fc.ShapeIndexes = _orig.ShapeIndexes;
-        // 여러 줄 칸: 시작 칸을 안 바꿨으면 원래 칸 목록(줄 수 포함) 유지
-        if (Type == FieldTypes.Multiline && _orig.Cells is { Count: > 0 }
-            && string.Equals(_orig.Cells[0], _cellAddress, StringComparison.OrdinalIgnoreCase))
-            fc.Cells = _orig.Cells;
-        return fc;
-    }
+    /// <summary>값 이름(Key). 다른 문서와 같은 값을 나눠 쓰면 여기 이름이 같다.</summary>
+    public string KeyText => string.IsNullOrWhiteSpace(_orig.Key) || _orig.Key.Trim() == _orig.Label.Trim()
+                             ? "" : _orig.Key.Trim();
 
-    private FieldConfig BuildFieldConfig()
-    {
-        if (IsTableType)
-        {
-            var fc = new FieldConfig
-            {
-                Id       = FieldId,
-                Label    = Label,
-                Type     = Type,
-                StartRow = StartRow,
-                EndRow   = EndRow,
-            };
-
-            if (IsEquipTable)
-            {
-                fc.NameCol    = NameCol;
-                fc.PrevDayCol = PrevDayCol;
-                fc.TodayCol   = TodayCol;
-            }
-            else
-            {
-                fc.RoleCol           = RoleCol;
-                fc.PrevCumulativeCol = PrevCumulativeCol;
-                fc.TodayCol          = TodayCol;
-            }
-            return fc;
-        }
-
-        if (Type == FieldTypes.Multiline)
-        {
-            return new FieldConfig
-            {
-                Id    = FieldId,
-                Label = Label,
-                Type  = Type,
-                Cells = BuildCellRange(_cellAddress, 9),
-            };
-        }
-
-        return new FieldConfig
-        {
-            Id    = FieldId,
-            Label = Label,
-            Type  = Type,
-            Cell  = string.IsNullOrWhiteSpace(_cellAddress) ? null : _cellAddress,
-        };
-    }
-
-    private static List<string> BuildCellRange(string startCell, int count)
-    {
-        if (string.IsNullOrWhiteSpace(startCell)) return [];
-
-        int i = 0;
-        while (i < startCell.Length && char.IsLetter(startCell[i])) i++;
-
-        string col = startCell[..i].ToUpperInvariant();
-        if (!int.TryParse(startCell[i..], out int startRow)) return [];
-
-        return Enumerable.Range(startRow, count).Select(r => $"{col}{r}").ToList();
-    }
+    /// <summary>이 화면에서는 고치지 않으므로 원본 그대로 (복사본)</summary>
+    public FieldConfig ToFieldConfig() =>
+        System.Text.Json.JsonSerializer.Deserialize<FieldConfig>(System.Text.Json.JsonSerializer.Serialize(_orig))!;
 }

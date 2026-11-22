@@ -6,62 +6,73 @@ using FormFiller.Core.Config;
 namespace FormFiller.App.ViewModels.Settings;
 
 /// <summary>
-/// 설정 창(SettingsWindow)의 ViewModel.
-///
-/// config.json에 있는 모든 문서를 DocumentEditViewModel로 감싸
-/// Documents 컬렉션으로 노출한다.
+/// 문서 관리 창(SettingsWindow)의 ViewModel.
+/// 왼쪽 = 문서 목록(Documents), 오른쪽 = 고른 문서(SelectedDocument)의 기본 정보 + 항목 요약.
 /// 저장 시 각 DocumentEditViewModel.ToConfig()로 변환 후 config.json에 덮어쓴다.
 /// </summary>
 public class SettingsViewModel : ViewModelBase
 {
-    /// <summary>편집 중인 문서 목록 (ItemsControl에 바인딩)</summary>
     public ObservableCollection<DocumentEditViewModel> Documents { get; } = [];
 
-    /// <summary>모든 변경을 config.json에 저장한다</summary>
-    public ICommand SaveCommand { get; }
+    private DocumentEditViewModel? _selectedDocument;
+    public DocumentEditViewModel? SelectedDocument
+    {
+        get => _selectedDocument;
+        set { if (SetField(ref _selectedDocument, value)) OnPropertyChanged(nameof(HasSelection)); }
+    }
 
-    public SettingsViewModel()
+    public bool HasSelection => _selectedDocument != null;
+
+    public ICommand SaveCommand   { get; }
+    public ICommand DeleteCommand { get; }
+
+    /// <summary>XAML 에서 만드는 기본 생성자 (첫 문서를 고른다)</summary>
+    public SettingsViewModel() : this(null) { }
+
+    /// <param name="selectId">처음에 고를 문서 Id (없으면 첫 문서)</param>
+    public SettingsViewModel(string? selectId)
     {
         var config = AppConfigLoader.Load();
-
         foreach (var doc in config.Documents)
-            Documents.Add(new DocumentEditViewModel(doc, RemoveDocument));
+            Documents.Add(new DocumentEditViewModel(doc));
 
-        SaveCommand = new RelayCommand(_ => OnSave());
+        SelectedDocument = Documents.FirstOrDefault(d => d.Id == selectId) ?? Documents.FirstOrDefault();
+
+        SaveCommand   = new RelayCommand(_ => OnSave());
+        DeleteCommand = new RelayCommand(_ => RemoveSelected());
     }
 
-    // ── 메서드 ──────────────────────────────────────────────────────
-
-    /// <summary>문서 삭제 버튼에서 호출된다. 확인 후 목록에서 제거한다.</summary>
-    private void RemoveDocument(DocumentEditViewModel doc)
+    private void RemoveSelected()
     {
+        if (_selectedDocument is not { } doc) return;
         var result = MessageBox.Show(
-            $"'{doc.Name}' 문서를 삭제할까요?",
+            $"'{doc.Name}' 문서를 목록에서 지울까요?\n(서식 파일·만든 파일은 지워지지 않습니다. [저장]을 눌러야 반영됩니다.)",
             "문서 삭제", MessageBoxButton.YesNo, MessageBoxImage.Question);
+        if (result != MessageBoxResult.Yes) return;
 
-        if (result == MessageBoxResult.Yes)
-            Documents.Remove(doc);
+        int index = Documents.IndexOf(doc);
+        Documents.Remove(doc);
+        SelectedDocument = Documents.Count == 0 ? null : Documents[Math.Min(index, Documents.Count - 1)];
     }
 
-    /// <summary>
-    /// 현재 Documents 목록 전체를 config.json에 저장한다.
-    /// AppConfigLoader.Load()로 outputFolder 등 다른 값은 보존한다.
-    /// </summary>
-    private void OnSave()
+    /// <summary>현재 Documents 목록 전체를 config.json에 저장한다 (outputFolder 등 다른 값은 보존).</summary>
+    public bool Save(bool showDone = true)
     {
         try
         {
             var config = AppConfigLoader.Load();
             config.Documents = Documents.Select(d => d.ToConfig()).ToList();
             AppConfigLoader.Save(config);
-
-            MessageBox.Show("저장되었습니다.", "저장 완료",
-                MessageBoxButton.OK, MessageBoxImage.Information);
+            if (showDone)
+                MessageBox.Show("저장되었습니다.", "저장 완료", MessageBoxButton.OK, MessageBoxImage.Information);
+            return true;
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"저장 오류\n{ex.Message}", "오류",
-                MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show($"저장 오류\n{ex.Message}", "오류", MessageBoxButton.OK, MessageBoxImage.Error);
+            return false;
         }
     }
+
+    private void OnSave() => Save();
 }

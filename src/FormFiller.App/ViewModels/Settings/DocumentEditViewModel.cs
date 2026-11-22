@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.IO;
+using System.Windows;
 using System.Windows.Input;
 using FormFiller.Core.Config;
 using FormFiller.Core.Excel;
@@ -8,40 +9,41 @@ using Microsoft.Win32;
 namespace FormFiller.App.ViewModels.Settings;
 
 /// <summary>
-/// 설정 화면에서 한 문서(DocumentConfig)를 편집하는 ViewModel.
-/// 생성자에서 DocumentConfig를 받아 프로퍼티에 풀고,
-/// ToConfig()로 다시 DocumentConfig로 변환해 저장에 사용한다.
+/// 문서 관리 화면에서 한 문서(DocumentConfig)를 보여 주고, 이름·서식 파일·출력 이름·주기만 고치는 ViewModel.
+/// 칸·규칙·사진은 [✏ 칸 편집](DocumentSetupWindow)에서만 바꾼다 (2026-11-22 화면 정리).
+/// 이 화면에서 다루지 않는 값(시트·사진·수장재 등)은 ToConfig() 때 원본 그대로 보존한다.
 /// </summary>
 public class DocumentEditViewModel : ViewModelBase
 {
-    // ── 식별자 (변경 불가) ────────────────────────────────────────────
     public string Id { get; }
 
-    // ── 기본 정보 ────────────────────────────────────────────────────
-
     private string _name;
-    public string Name { get => _name; set => SetField(ref _name, value); }
+    public string Name { get => _name; set { if (SetField(ref _name, value)) OnPropertyChanged(nameof(ListTitle)); } }
 
     private string _templateFile;
-
-    /// <summary>
-    /// 서식 파일 경로. 바뀌면 시트 목록을 자동으로 다시 읽는다.
-    /// </summary>
     public string TemplateFile
     {
         get => _templateFile;
-        set { if (SetField(ref _templateFile, value)) ReloadSheets(); }
+        set
+        {
+            if (!SetField(ref _templateFile, value)) return;
+            OnPropertyChanged(nameof(TemplateMissing));
+            OnPropertyChanged(nameof(ListSubtitle));
+        }
+    }
+
+    /// <summary>서식 파일이 없으면 true (경고 표시용)</summary>
+    public bool TemplateMissing
+    {
+        get
+        {
+            string path = AppConfigLoader.ResolvePath(_templateFile);
+            return string.IsNullOrWhiteSpace(path) || !File.Exists(path);
+        }
     }
 
     private string _outputPattern;
     public string OutputPattern { get => _outputPattern; set => SetField(ref _outputPattern, value); }
-
-    // ── 시트 ────────────────────────────────────────────────────────
-
-    public ObservableCollection<string> SheetNames { get; } = [];
-
-    private string _selectedSheet = "";
-    public string SelectedSheet { get => _selectedSheet; set => SetField(ref _selectedSheet, value); }
 
     // ── 생성 주기 ────────────────────────────────────────────────────
 
@@ -56,6 +58,7 @@ public class DocumentEditViewModel : ViewModelBase
             if (!SetField(ref _selectedFrequency, value)) return;
             OnPropertyChanged(nameof(IsCustomFrequency));
             OnPropertyChanged(nameof(IsWeeklyFrequency));
+            OnPropertyChanged(nameof(ListSubtitle));
         }
     }
 
@@ -64,195 +67,116 @@ public class DocumentEditViewModel : ViewModelBase
     private int _frequencyDays;
     public int FrequencyDays { get => _frequencyDays; set => SetField(ref _frequencyDays, value); }
 
-    // ── 매주 주기: 요일 + 파일 날짜 ──────────────────────────────────
     public bool IsWeeklyFrequency => _selectedFrequency?.Value == "weekly";
     public IReadOnlyList<WeekdayOption> WeekdayOptions { get; } = WeekdayOption.All;
 
-    private WeekdayOption _selectedWeekday = WeekdayOption.Of(DayOfWeek.Monday);
+    private WeekdayOption _selectedWeekday;
     public WeekdayOption SelectedWeekday { get => _selectedWeekday; set => SetField(ref _selectedWeekday, value); }
 
     private bool _useWeeklyDayDate;
     /// <summary>true: 그 주 정한 요일 날짜로 파일을 만든다 / false: 만드는 날 날짜</summary>
     public bool UseWeeklyDayDate { get => _useWeeklyDayDate; set => SetField(ref _useWeeklyDayDate, value); }
 
-    // ── 수장재팀 포함 여부 ────────────────────────────────────────────
-
-    private bool _includesSujangjae;
-    public bool IncludesSujangjae { get => _includesSujangjae; set => SetField(ref _includesSujangjae, value); }
-
-    // ── 사진 시트 ────────────────────────────────────────────────────
-
-    private const string NoPhotoOption = "없음 (사진 기능 미사용)";
-
-    /// <summary>"없음…" + SheetNames 로 구성된 사진 시트 선택 목록</summary>
-    public ObservableCollection<string> PhotoSheetOptions { get; } = [NoPhotoOption];
-
-    private string _selectedPhotoSheet = NoPhotoOption;
-
-    public string SelectedPhotoSheet
-    {
-        get => _selectedPhotoSheet;
-        set
-        {
-            if (SetField(ref _selectedPhotoSheet, value))
-            {
-                OnPropertyChanged(nameof(PhotoSheet));
-                ReloadPhotoSlotRows();
-            }
-        }
-    }
-
-    // ── 사진 슬롯 이름 목록 ──────────────────────────────────────────
-
-    /// <summary>
-    /// 선택된 사진 시트에서 감지된 슬롯 목록.
-    /// 각 행에서 사용자가 슬롯 이름을 편집할 수 있다.
-    /// </summary>
-    public ObservableCollection<PhotoSlotLabelRow> PhotoSlotRows { get; } = [];
-
-    /// <summary>저장용 실제 값. "없음…" 선택이면 빈 문자열.</summary>
-    public string PhotoSheet =>
-        _selectedPhotoSheet == NoPhotoOption ? "" : _selectedPhotoSheet ?? "";
-
-    // ── 필드 목록 ────────────────────────────────────────────────────
+    // ── 항목 (읽기 전용) ─────────────────────────────────────────────
 
     public ObservableCollection<FieldEditRow> Fields { get; } = [];
 
+    public bool HasLegacyFields => Fields.Any(f => f.IsLegacy);
+
+    // ── 왼쪽 목록 표시 ───────────────────────────────────────────────
+
+    public string ListTitle => string.IsNullOrWhiteSpace(Name) ? "(이름 없음)" : Name;
+
+    public string ListSubtitle =>
+        $"{_selectedFrequency?.Label ?? "매일"} · 항목 {Fields.Count}개" + (TemplateMissing ? " · ⚠ 서식 없음" : "");
+
     // ── 커맨드 ──────────────────────────────────────────────────────
 
-    public ICommand BrowseFileCommand     { get; }
-    public ICommand DeleteDocumentCommand { get; }
+    public ICommand BrowseFileCommand   { get; }
+    public ICommand TestGenerateCommand { get; }
 
-    // ── 내부 ────────────────────────────────────────────────────────
-
-    /// <summary>config에서 불러온 초기 슬롯 이름 (index → label). 슬롯 로드 시 복원에 사용.</summary>
-    private readonly Dictionary<int, string> _initialSlotLabels;
-
-    // ── 생성자 ──────────────────────────────────────────────────────
-
-    /// <summary>불러온 원본 (이 화면에서 다루지 않는 값 — 여러 시트, 사진 폴더 등 — 을 저장 때 그대로 보존)</summary>
     private readonly DocumentConfig _original;
 
-    public DocumentEditViewModel(DocumentConfig doc, Action<DocumentEditViewModel> onDelete)
+    public DocumentEditViewModel(DocumentConfig doc)
     {
-        _original          = doc;
-        Id                 = doc.Id;
-        _name              = doc.Name;
-        _templateFile      = doc.TemplateFile;
-        _outputPattern     = doc.OutputPattern;
-        _selectedSheet     = doc.SheetName;
-        _frequencyDays     = doc.FrequencyDays;
-        _selectedWeekday   = WeekdayOption.Of(doc.WeeklyDay);
-        _useWeeklyDayDate  = doc.UseWeeklyDayDate;
-        _includesSujangjae = doc.IncludesSujangjae;
-
-        // 저장된 photoSheet 값을 선택 상태로 복원 (ReloadSheets 후에 처리)
-        _selectedPhotoSheet = string.IsNullOrEmpty(doc.PhotoSheet) ? NoPhotoOption : doc.PhotoSheet;
-
+        _original         = doc;
+        Id                = doc.Id;
+        _name             = doc.Name;
+        _templateFile     = doc.TemplateFile;
+        _outputPattern    = doc.OutputPattern;
+        _frequencyDays    = doc.FrequencyDays;
+        _selectedWeekday  = WeekdayOption.Of(doc.WeeklyDay);
+        _useWeeklyDayDate = doc.UseWeeklyDayDate;
         _selectedFrequency = FrequencyOption.All.FirstOrDefault(f => f.Value == doc.Frequency)
                              ?? FrequencyOption.All[0];
-
-        _initialSlotLabels = doc.PhotoSlots.ToDictionary(s => s.Index, s => s.Label);
 
         foreach (var f in doc.Fields)
             Fields.Add(new FieldEditRow(f));
 
-        ReloadSheets();
-        // ReloadSheets 가 PhotoSheetOptions 를 채운 뒤 슬롯도 로드한다
-        ReloadPhotoSlotRows();
-
-        BrowseFileCommand     = new RelayCommand(_ => BrowseFile());
-        DeleteDocumentCommand = new RelayCommand(_ => onDelete(this));
+        BrowseFileCommand   = new RelayCommand(_ => BrowseFile());
+        TestGenerateCommand = new RelayCommand(_ => TestGenerate());
     }
-
-    // ── 메서드 ──────────────────────────────────────────────────────
 
     private void BrowseFile()
     {
         var dlg = new OpenFileDialog
         {
             Title  = "서식 파일 선택",
-            Filter = "Excel 파일 (*.xlsx)|*.xlsx",
+            Filter = "서식 파일 (*.xlsx;*.hwpx)|*.xlsx;*.hwpx",
         };
         if (dlg.ShowDialog() == true)
             TemplateFile = dlg.FileName;
     }
 
-    private void ReloadSheets()
+    /// <summary>[🧪 시험 생성]: 지금 화면 값으로 임시 폴더에 오늘 파일을 만들어 본다 (저장 안 함).</summary>
+    private void TestGenerate()
     {
-        SheetNames.Clear();
-        string path = AppConfigLoader.ResolvePath(_templateFile);
-        if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
+        string template = AppConfigLoader.ResolvePath(_templateFile);
+        if (TemplateMissing)
         {
-            foreach (var s in ExcelAnalyzer.GetSheetNames(path))
-                SheetNames.Add(s);
-
-            if (!SheetNames.Contains(_selectedSheet) && SheetNames.Count > 0)
-                SelectedSheet = SheetNames[0];
+            MessageBox.Show("서식 파일을 찾을 수 없습니다. [찾아보기]로 서식을 다시 골라 주세요.", "시험 생성",
+                            MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
         }
-
-        // 사진 시트 선택 목록 갱신
-        PhotoSheetOptions.Clear();
-        PhotoSheetOptions.Add(NoPhotoOption);
-        foreach (var s in SheetNames)
-            PhotoSheetOptions.Add(s);
-
-        // 이전 선택값이 목록에 있으면 유지, 없으면 "없음"으로
-        if (!PhotoSheetOptions.Contains(_selectedPhotoSheet))
-            SelectedPhotoSheet = NoPhotoOption;
-    }
-
-    /// <summary>
-    /// 선택된 사진 시트에서 이미지 슬롯을 감지해 PhotoSlotRows를 갱신한다.
-    /// 이전 행에 이름이 있으면 최대한 보존한다.
-    /// </summary>
-    private void ReloadPhotoSlotRows()
-    {
-        // 현재 편집 중인 이름을 보존 (시트가 바뀌면 버리고 초기값으로 돌아감)
-        var currentLabels = PhotoSlotRows.ToDictionary(r => r.SlotIndex, r => r.Label);
-        PhotoSlotRows.Clear();
-
-        string path = AppConfigLoader.ResolvePath(_templateFile);
-        if (string.IsNullOrEmpty(PhotoSheet)
-            || string.IsNullOrWhiteSpace(path)
-            || !File.Exists(path)) return;
+        if (!template.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase))
+        {
+            MessageBox.Show("시험 생성은 엑셀 서식만 됩니다.", "시험 생성", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
 
         try
         {
-            var slotInfos = ExcelPhotoWriter.GetPhotoSlotInfos(path, PhotoSheet);
-            foreach (var slot in slotInfos)
-            {
-                // 우선순위: 현재 편집값 > config 저장값 > 빈 문자열
-                string label = currentLabels.TryGetValue(slot.SlotIndex, out var cur) ? cur
-                             : _initialSlotLabels.TryGetValue(slot.SlotIndex, out var init) ? init
-                             : "";
-                byte[]? imgBytes = ExcelPhotoWriter.GetSlotImageBytes(path, PhotoSheet, slot.SlotIndex);
-                PhotoSlotRows.Add(new PhotoSlotLabelRow(slot.SlotIndex, slot.WidthPx, slot.HeightPx, label, imgBytes));
-            }
+            var notes = new List<string>();
+            string path = TrialGenerator.Generate(ToConfig(), template, TrialGenerator.NewTempFolder(), DateTime.Today, notes);
+
+            string msg = $"시험 파일을 만들었습니다 (임시 폴더, 실제 출력 폴더는 그대로).\n{path}\n\n" +
+                         "입력 칸은 서식에 적힌 글자를 그대로 넣었습니다. 칸 위치·날짜 형식·식 결과를 확인하세요.";
+            if (notes.Count > 0) msg += "\n\n참고:\n· " + string.Join("\n· ", notes.Take(8));
+            if (MessageBox.Show(msg + "\n\n지금 열까요?", "시험 생성", MessageBoxButton.YesNo,
+                                MessageBoxImage.Information) == MessageBoxResult.Yes)
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path) { UseShellExecute = true });
         }
-        catch { /* 파일 접근 실패 시 목록 비움 */ }
+        catch (Exception ex)
+        {
+            AppLog.Error("시험 생성 실패", ex);
+            MessageBox.Show($"시험 생성 중 오류가 났습니다.\n{ex.Message}", "시험 생성",
+                            MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
     }
 
-    /// <summary>현재 편집 상태를 DocumentConfig로 변환한다.</summary>
-    public DocumentConfig ToConfig() => new()
+    /// <summary>현재 편집 상태를 DocumentConfig 로. 이 화면에서 다루지 않는 값은 원본 그대로.</summary>
+    public DocumentConfig ToConfig()
     {
-        Id                = Id,
-        Name              = Name,
-        TemplateFile      = AppConfigLoader.ToStoredTemplatePath(TemplateFile),
-        OutputPattern     = OutputPattern,
-        SheetName         = SelectedSheet,
-        Frequency         = _selectedFrequency?.Value ?? "daily",
-        FrequencyDays     = IsCustomFrequency ? FrequencyDays : 0,
-        WeeklyDay         = SelectedWeekday.Value,
-        UseWeeklyDayDate  = IsWeeklyFrequency && UseWeeklyDayDate,
-        IncludesSujangjae = IncludesSujangjae,
-        PhotoSheet        = PhotoSheet,
-        PhotoSlots        = PhotoSlotRows.Select(r => r.ToConfig()).ToList(),
-        Fields            = Fields.Select(f => f.ToFieldConfig()).ToList(),
-        // 이 화면에서 편집하지 않는 값은 원본 그대로
-        SheetNames        = _original.SheetNames.Contains(SelectedSheet) ? _original.SheetNames : [],
-        PhotoFolder       = _original.PhotoFolder,
-        SaveMode          = _original.SaveMode,
-        UsePreviousAsBase = _original.UsePreviousAsBase,
-    };
+        var doc = System.Text.Json.JsonSerializer.Deserialize<DocumentConfig>(
+                      System.Text.Json.JsonSerializer.Serialize(_original))!;
+        doc.Name             = Name;
+        doc.TemplateFile     = AppConfigLoader.ToStoredTemplatePath(TemplateFile);
+        doc.OutputPattern    = OutputPattern;
+        doc.Frequency        = _selectedFrequency?.Value ?? "daily";
+        if (IsCustomFrequency) doc.FrequencyDays = FrequencyDays;   // 그 외 주기에서는 쓰지 않으므로 원래 값 유지
+        doc.WeeklyDay        = SelectedWeekday.Value;
+        doc.UseWeeklyDayDate = IsWeeklyFrequency && UseWeeklyDayDate;
+        doc.Fields           = Fields.Select(f => f.ToFieldConfig()).ToList();
+        return doc;
+    }
 }
