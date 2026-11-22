@@ -1,4 +1,4 @@
-﻿using FluentAssertions;
+using FluentAssertions;
 using FormFiller.Core.Config;
 using FormFiller.Core.Excel;
 using FormFiller.Tests.Helpers;
