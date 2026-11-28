@@ -23,7 +23,7 @@
         </Grid.RowDefinitions>
 
         <!-- 헤더 -->
-        <TextBlock Grid.Row="0" Text="항목을 체크하거나 직접 입력하세요."
+        <TextBlock Grid.Row="0" x:Name="HeaderText" TextWrapping="Wrap"
                    Foreground="#4A5568" FontSize="12" Margin="0,0,0,8"/>
 
         <!-- 미리 설정된 항목 목록 -->
@@ -44,7 +44,7 @@
                      Grid.Column="0"
                      Padding="6,4"
                      BorderBrush="#CBD5E0"
-                     ToolTip="직접 입력..."
+                     ToolTip="새 항목을 쓰고 [목록에 추가] (목록에 남음) 또는 Enter/[바로 추가] (이번만)"
                      KeyDown="CustomTextBox_KeyDown"/>
             <Button Grid.Column="1" Content="목록에 추가"
                     Margin="6,0,0,0"

@@ -132,9 +132,9 @@ public partial class MainViewModel : ViewModelBase
         if (vm is LinesInputViewModel lines)
             lines.PickRequested += l =>
             {
-                var win = new WorkItemPickerWindow { Owner = Application.Current.MainWindow };
+                var win = new WorkItemPickerWindow(l.Key) { Owner = Application.Current.MainWindow };
                 if (win.ShowDialog() == true)
-                    foreach (var text in win.SelectedItems) l.Add(text);
+                    l.AddPicked(win.SelectedItems);
             };
         if (vm is PhotosInputViewModel photos)
             photos.ImportRequested += p => ImportBlockPhotos(p);
@@ -616,7 +616,7 @@ public partial class MainViewModel : ViewModelBase
 
     private static void OpenWorkPicker(ObservableCollection<WorkItemViewModel> target)
     {
-        var win = new WorkItemPickerWindow { Owner = Application.Current.MainWindow };
+        var win = new WorkItemPickerWindow("작업사항") { Owner = Application.Current.MainWindow };
         if (win.ShowDialog() == true)
         {
             foreach (var text in win.SelectedItems)

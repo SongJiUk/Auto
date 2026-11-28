@@ -124,6 +124,20 @@ public class LinesInputViewModel : BlockInputViewModel
         Lines.Add(item);
     }
 
+    /// <summary>
+    /// [☰ 항목 선택] 에서 고른 것을 넣는다. 아무것도 안 쓴 빈 줄(앞 글자만 있는 줄)은 먼저 지우고,
+    /// 앞 글자(예: "- ")가 정해져 있으면 붙인다.
+    /// </summary>
+    public void AddPicked(IEnumerable<string> picked)
+    {
+        string bare = Prefix.Trim();
+        foreach (var empty in Lines.Where(l => l.Text.Trim() == bare).ToList()) Lines.Remove(empty);
+        foreach (var text in picked)
+            Add(Prefix.Length > 0 && !text.StartsWith(bare) ? Prefix + text : text);
+        IsEdited = true;
+        RaiseEdited();
+    }
+
     public override void Load(BlockValue initial, bool keepEdits)
     {
         if (keepEdits && IsEdited) return;

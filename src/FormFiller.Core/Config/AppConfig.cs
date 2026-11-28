@@ -31,6 +31,12 @@ public class AppConfig
     ];
 
     /// <summary>
+    /// [☰ 항목 선택] 목록을 여러 줄 항목(값 이름)마다 따로 둔다. 예: "금일 작업사항", "장비 이름", "장비 규격".
+    /// 다루는 규칙은 <see cref="PickLists"/>.
+    /// </summary>
+    public Dictionary<string, ItemPickList> ItemPickLists { get; set; } = [];
+
+    /// <summary>
     /// Claude AI 채팅 기능에 사용할 Anthropic API 키.
     /// 비어 있으면 AI 기능 비활성화. 절대 git에 올리지 말 것.
     /// </summary>
@@ -59,6 +65,15 @@ public class AppConfig
 
     /// <summary>마지막으로 설정을 저장한 시각 (이 PC 시각)</summary>
     public DateTime? LastSavedAt { get; set; }
+}
+
+/// <summary>[☰ 항목 선택] 목록 하나 (여러 줄 항목 하나에 대응)</summary>
+public class ItemPickList
+{
+    /// <summary>체크해서 넣을 수 있는 글자들</summary>
+    public List<string> Items { get; set; } = [];
+    /// <summary>마지막으로 고른 것 — 다음에 창을 열면 미리 체크돼 있다</summary>
+    public List<string> LastChosen { get; set; } = [];
 }
 
 /// <summary>명단 블록의 사람 한 명</summary>
